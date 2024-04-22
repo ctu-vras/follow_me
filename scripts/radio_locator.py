@@ -10,7 +10,7 @@ from geometry_msgs.msg import (
     Vector3,
     PoseWithCovarianceStamped,
 )
-from dwm1001c_ros.msg import UWBMeas
+from dwm1001_ros.msg import UWBMeas
 from std_msgs.msg import Bool, String
 from follow_me.msg import PositionEstimate, HeadingEstimate
 from geometry_msgs.msg import Point

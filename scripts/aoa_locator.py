@@ -2,7 +2,7 @@
 
 import rospy
 
-from xplraoa1_ros.msg import Angles
+from xplraoa_ros.msg import Angles
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, TransformStamped, Quaternion, Vector3
 from follow_me.msg import HeadingEstimate
@@ -54,18 +54,18 @@ class Kalman:
         # )
         self.A = np.array(
             [
-                [1, 0,0],
-                [0, 1,0],
-                [0,0,1],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
             ]
         )
         self.Q = Q * np.eye(3)
         self.R = R * np.eye(3)
         self.H = np.array(
             [
-                [1, 0,0],
-                [0, 1,0],
-                [0,0,1],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
             ]
         )
 
@@ -293,7 +293,7 @@ class Locator:
         rssi_cp = deepcopy(self.rssi)
         angles_cp = deepcopy(self.angles)
         self.msg_lock.release()
-        
+
         # find antenna with highest RSSI (mean of last few measurements)
         max_rssi = -np.inf
         selected_id = None
@@ -307,7 +307,7 @@ class Locator:
                 mean_mod = mean - 2 * std
                 az = angles_cp[id][-1][0]
                 el = angles_cp[id][-1][1]
-                scale = 5*np.log10((mean+100)/10)
+                scale = 5 * np.log10((mean + 100) / 10)
                 self.markers[id].header.stamp = rospy.Time.now()
                 self.markers[id].points = [
                     Point(0, 0, 0),
@@ -346,13 +346,13 @@ class Locator:
         # filter using linear Kalman
         az = float(target_angles[0])
         el = float(target_angles[1])
-        p = np.array([[np.cos(el) * np.cos(az)],
-                    [np.cos(el) * np.sin(az)],
-                    [np.sin(el)]])
+        p = np.array(
+            [[np.cos(el) * np.cos(az)], [np.cos(el) * np.sin(az)], [np.sin(el)]]
+        )
         t = self.get_transform(self.fixed_frame, self.frames[selected_id])
         if t is None:
             return
-        p = np.matmul(t, np.vstack((p,np.array([[1]]))))[:3,:]
+        p = np.matmul(t, np.vstack((p, np.array([[1]]))))[:3, :]
         if not self.initialised:
             self.filter.set_initial(p, np.eye(3))
             self.initialised = True
@@ -361,15 +361,15 @@ class Locator:
             x_new, cov = self.filter.predict()
             x_new /= np.linalg.norm(x_new)
 
-            Va = np.array([[1],[0],[0]])
-            Vn1 = np.array([[0],[0],[1]])
+            Va = np.array([[1], [0], [0]])
+            Vn1 = np.array([[0], [0], [1]])
             az_f = get_angle(Va, x_new, Vn1)
 
             c = np.cos(-az_f)
             s = np.sin(-az_f)
-            t2 = np.array([[c,-s,0],[s,c,0],[0,0,1]])
-            x2 = np.matmul(t2,x_new)
-            Vn2 = np.array([[0],[1],[0]])
+            t2 = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+            x2 = np.matmul(t2, x_new)
+            Vn2 = np.array([[0], [1], [0]])
             el_f = get_angle(x2, Va, Vn2)
 
             # publish the result as an estimate message (angles and reference tf frame)
@@ -398,7 +398,7 @@ class Locator:
     def estimate_angle_external(self, _):
         """use external estimate of transmitters position (i.e. uwb) to select antenna that has the transmitter in range"""
         t1 = rospy.get_time()
-        # compute heading towards the estimated position for each antenna board 
+        # compute heading towards the estimated position for each antenna board
         in_range = []
         Va = np.array([[1], [0], [0]])
         Vn = np.array([[0], [0], [1]])

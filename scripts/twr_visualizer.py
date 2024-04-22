@@ -3,7 +3,7 @@ import rospy
 
 import tf2_ros
 from geometry_msgs.msg import TransformStamped, Point
-from dwm1001c_ros.msg import UWBMeas, Anchor
+from dwm1001_ros.msg import UWBMeas, Anchor
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 

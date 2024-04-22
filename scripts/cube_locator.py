@@ -10,7 +10,7 @@ from geometry_msgs.msg import (
     Vector3,
     PoseWithCovarianceStamped,
 )
-from dwm1001c_ros.msg import UWBMeas
+from dwm1001_ros.msg import UWBMeas
 from std_msgs.msg import Bool, String
 from follow_me.msg import PositionEstimate, HeadingEstimate
 from geometry_msgs.msg import Point
@@ -126,13 +126,13 @@ class Locator:
 
         # TWR
         self.id = "C694"
-        self.position = np.array([[0],[0.085],[-0.01]])
+        self.position = np.array([[0], [0.085], [-0.01]])
         self.calibration = {}
         self.queue = deque()
         self.range = np.nan
         self.range_avg = 0.0
         self.uwb_stamp = None
-        self.lp_filter = butter(3, CUTOFF/(2*np.pi))
+        self.lp_filter = butter(3, CUTOFF / (2 * np.pi))
         self.zi = lfilter_zi(self.lp_filter[0], self.lp_filter[1])
         topic = "/uwb/twr/ID_" + self.id + "/distances"
         self.twr_subscriber = rospy.Subscriber(
@@ -241,19 +241,39 @@ class Locator:
             )
             return None
 
-        d = np.array([[np.cos(el) * np.cos(az)], [np.cos(el) * np.sin(az)], [np.sin(el)]])
+        d = np.array(
+            [[np.cos(el) * np.cos(az)], [np.cos(el) * np.sin(az)], [np.sin(el)]]
+        )
         d /= np.linalg.norm(d)
 
-        (a,b,c) = self.position[:,0]
-        (x0,y0,z0) = tf[:3,3]
-        (x1,y1,z1) = d[:,0]
+        (a, b, c) = self.position[:, 0]
+        (x0, y0, z0) = tf[:3, 3]
+        (x1, y1, z1) = d[:, 0]
         r = self.range_avg
 
-        A = x1**2+y1**2+z1**2
-        B = -2*a*x1-2*b*y1-2*c*z1+2*x0*x1+2*y0*y1+2*z0*z1
-        C = a**2-2*a*x0+b**2-2*b*y0+c**2-2*c*z0+x0**2+y0**2+z0**2-r**2
+        A = x1**2 + y1**2 + z1**2
+        B = (
+            -2 * a * x1
+            - 2 * b * y1
+            - 2 * c * z1
+            + 2 * x0 * x1
+            + 2 * y0 * y1
+            + 2 * z0 * z1
+        )
+        C = (
+            a**2
+            - 2 * a * x0
+            + b**2
+            - 2 * b * y0
+            + c**2
+            - 2 * c * z0
+            + x0**2
+            + y0**2
+            + z0**2
+            - r**2
+        )
 
-        roots = np.roots([A,B,C])
+        roots = np.roots([A, B, C])
         t = None
         for root in roots:
             if np.isreal(root) and root >= 0:
@@ -262,7 +282,7 @@ class Locator:
         if t is None:
             return None
         else:
-            x = np.array([x0+t*x1,y0+t*y1,z0+t*z1])
+            x = np.array([x0 + t * x1, y0 + t * y1, z0 + t * z1])
             return x
 
     def publish_pose(self, _):

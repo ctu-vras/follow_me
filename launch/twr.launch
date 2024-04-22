@@ -5,15 +5,15 @@
 
     <rosparam command="load" file="$(find follow_me)/config/twr.yaml" />
 
-    <include file="$(find dwm1001c_ros)/launch/tag_node.launch" pass_all_args="true">
+    <include file="$(find dwm1001_ros)/launch/tag_node.launch" pass_all_args="true">
         <arg name="usb_port" value="/dev/ttyACM_uwb5722"/>
     </include>
 
-    <include file="$(find dwm1001c_ros)/launch/tag_node.launch" pass_all_args="true">
+    <include file="$(find dwm1001_ros)/launch/tag_node.launch" pass_all_args="true">
         <arg name="usb_port" value="/dev/ttyACM_uwb5a84"/>
     </include>
 
-    <include file="$(find dwm1001c_ros)/launch/tag_node.launch" pass_all_args="true">
+    <include file="$(find dwm1001_ros)/launch/tag_node.launch" pass_all_args="true">
         <arg name="usb_port" value="/dev/ttyACM_uwbc4b5"/>
     </include>
 </launch>

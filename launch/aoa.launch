@@ -1,21 +1,21 @@
 <launch>
     <rosparam command="load" file="$(find follow_me)/config/aoa.yaml" />
-    <include file="$(find xplraoa1_ros)/launch/anchor_node.launch">
+    <include file="$(find xplraoa_ros)/launch/anchor_node.launch">
         <arg name="usb_port" value="/dev/ttyUSB_aoa1"/>
         <arg name="n_avg" value="3"/>
         <arg name="id" value="an1"/>
     </include>
-    <include file="$(find xplraoa1_ros)/launch/anchor_node.launch">
+    <include file="$(find xplraoa_ros)/launch/anchor_node.launch">
         <arg name="usb_port" value="/dev/ttyUSB_aoa2"/>
         <arg name="n_avg" value="3"/>
         <arg name="id" value="an2"/>
     </include>
-    <include file="$(find xplraoa1_ros)/launch/anchor_node.launch">
+    <include file="$(find xplraoa_ros)/launch/anchor_node.launch">
         <arg name="usb_port" value="/dev/ttyUSB_aoa3"/>
         <arg name="n_avg" value="3"/>
         <arg name="id" value="an3"/>
     </include>
-    <include file="$(find xplraoa1_ros)/launch/anchor_node.launch">
+    <include file="$(find xplraoa_ros)/launch/anchor_node.launch">
         <arg name="usb_port" value="/dev/ttyUSB_aoa4"/>
         <arg name="n_avg" value="3"/>
         <arg name="id" value="an4"/>

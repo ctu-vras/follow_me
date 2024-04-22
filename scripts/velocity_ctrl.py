@@ -3,7 +3,7 @@
 import rospy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool, String
-from dwm1001c_ros.msg import UWBMeas
+from dwm1001_ros.msg import UWBMeas
 import tf2_ros
 import tf2_py as tf2
 import ros_numpy

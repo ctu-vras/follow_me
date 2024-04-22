@@ -5,7 +5,7 @@ import rospy
 import copy
 
 from uwb_tdoa.msg import TDoAMeas
-from xplraoa1_ros.msg import Angles
+from xplraoa_ros.msg import Angles
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker
 from std_msgs.msg import Bool, String
