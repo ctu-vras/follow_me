@@ -40,16 +40,16 @@ catkin_package(
 
 # FIXME: keep the list updated with new files and names
 catkin_install_python(PROGRAMS
-    scripts/twr_visualizer.py
-    scripts/locator_isolated.py
-    scripts/velocity_ctrl.py
-    scripts/tdoa_locator.py
-    scripts/twr_locator.py
     scripts/aoa_locator.py
-    scripts/radio_locator.py
     scripts/cube_locator.py
     scripts/cube_marker.py
     scripts/logger.py
+    scripts/publish_tfs.py
+    scripts/radio_locator.py
+    scripts/tdoa_locator.py
+    scripts/twr_locator.py
+    scripts/twr_visualizer.py
+    scripts/velocity_ctrl.py
     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
