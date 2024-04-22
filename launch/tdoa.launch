@@ -1,0 +1,4 @@
+<launch>
+    <rosparam command="load" file="$(find follow_me)/config/tdoa.yaml" />
+    <node name="$(anon tdoa_driver)" pkg="uwb_tdoa" type="driver.py" output="screen" required='true'/>
+</launch>

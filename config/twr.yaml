@@ -1,0 +1,22 @@
+fixed_frame: "locator"
+human_frame: "twr_position"
+use_3d: false
+
+ids: [
+  "5722",
+  "5A84",
+  "C4B5",
+]
+
+positions: [
+  #x,y,z
+  0.175, 0.075, 0.115,
+  -0.07, -0.04, 0.093,
+  -0.30, 0.08, 0.098,
+]
+
+calibration: [
+  0, 0, 1, 0,
+  0, 0, 1, 0,
+  0, 0, 1, 0,
+]

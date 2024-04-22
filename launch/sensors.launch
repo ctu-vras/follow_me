@@ -1,0 +1,24 @@
+<launch>
+    <arg name="tdoa_ns" value="uwb/tdoa"/>
+    <arg name="twr_ns" value="uwb/twr"/>
+    <arg name="aoa_ns" value="bluetooth/aoa"/>
+
+    <group if="$(arg tdoa_available)" ns="$(arg tdoa_ns)">
+        <param name="mount_height" type="double" value="$(arg mount_height)" />
+        <include file="$(find follow_me)/launch/tdoa.launch"/>
+        <node name="$(anon tdoa_locator)" pkg="follow_me" type="tdoa_locator.py" output="screen" required='true'/>
+    </group>
+
+    <group if="$(arg twr_available)" ns="$(arg twr_ns)">
+        <param name="mount_height" type="double" value="$(arg mount_height)" />
+        <include file="$(find follow_me)/launch/twr.launch"/>
+        <node name="$(anon twr_visualizer)" pkg="follow_me" type="twr_visualizer.py" output="screen" required='true'/>
+        <node name="$(anon twr_locator)" pkg="follow_me" type="twr_locator.py" output="screen" required='true'/>
+    </group>
+
+    <group if="$(arg bt_aoa_available)" ns="$(arg aoa_ns)">
+        <include file="$(find follow_me)/launch/aoa.launch"/>
+        <!-- <node name="$(anon aoa_locator)" pkg="follow_me" type="aoa_locator.py" output="screen" required='true'/> -->
+        <node name="$(anon aoa_locator)" pkg="follow_me" type="aoa_locator.py" output="screen" required='true'/>
+    </group>
+</launch>

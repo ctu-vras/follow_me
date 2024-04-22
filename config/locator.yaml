@@ -1,0 +1,10 @@
+prediction_frequency: 10.0
+fixed_frame: "locator"
+human_frame: "position"
+allow_backwards_motion: true
+follow_distance: 1.6
+safe_distance: 1.3
+
+tdoa_prefix: "/uwb/tdoa/"
+twr_prefix: "/uwb/twr/"
+bt_aoa_prefix: "/bluetooth/aoa/"

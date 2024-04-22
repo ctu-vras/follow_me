@@ -1,0 +1,42 @@
+<launch>
+    <arg name="follow_distance" default="1.5"/>
+    <arg name="name_space" default="follow_me"/>
+    <arg name="mount_height" default="0.0"/>
+    <arg name="twr_ns" value="uwb/twr"/>
+    <arg name="aoa_ns" value="bluetooth/aoa"/>
+
+    <rosparam command="load" file="$(find follow_me)/config/locator.yaml" ns="$(arg name_space)"/>
+
+    <node name="$(anon publish_tfs)" pkg="follow_me" type="publish_tfs.py" output="screen" required='true'/>
+
+    <group ns="$(arg twr_ns)">
+        <rosparam param="ids">
+            - C694
+        </rosparam>
+        <rosparam param="positions">
+            - 0.0
+            - 0.085
+            - -0.01
+        </rosparam>
+        <include file="$(find dwm1001c_ros)/launch/tag_node.launch" pass_all_args="true">
+            <arg name="usb_port" value="/dev/ttyACM_uwbc694"/>
+        </include>
+    </group>
+
+    <group ns="$(arg aoa_ns)">
+        <include file="$(find follow_me)/launch/aoa.launch"/>
+        <!-- <node name="$(anon aoa_locator)" pkg="follow_me" type="aoa_locator.py" output="screen" required='true'/> -->
+        <node name="$(anon aoa_locator)" pkg="follow_me" type="aoa_locator.py" output="screen" required='true'/>
+    </group>
+
+    <group ns="$(arg name_space)">
+        <!-- <node name="$(anon logger)" pkg="follow_me" type="logger.py" output="screen"/> -->
+        <node name="$(anon velocity_ctrl)" pkg="follow_me" type="velocity_ctrl.py" args="$(arg follow_distance)" output="screen" required='true'/>
+    </group>
+
+    <group ns="cube">
+        <rosparam command="load" file="$(find follow_me)/config/radio.yaml"/>
+        <node name="$(anon cube_locator)" pkg="follow_me" type="cube_locator.py" output="screen" required='true'/>
+        <node name="$(anon cube_marker)" pkg="follow_me" type="cube_marker.py" output="screen" required='true'/>
+    </group>
+</launch>

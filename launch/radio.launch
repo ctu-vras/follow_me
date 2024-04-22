@@ -1,0 +1,27 @@
+<launch>
+    <arg name="follow_distance" default="1.0"/>
+    <arg name="name_space" default="follow_me"/>
+    <arg name="tdoa_available" default="false"/>
+    <arg name="twr_available" default="true"/>
+    <arg name="bt_aoa_available" default="true"/>
+    <arg name="mount_height" default="0.0"/>
+
+    <rosparam command="load" file="$(find follow_me)/config/locator.yaml" ns="$(arg name_space)"/>
+
+    <node name="$(anon publish_tfs)" pkg="follow_me" type="publish_tfs.py" output="screen" required='true'/>
+
+    <include file="$(find follow_me)/launch/sensors.launch" pass_all_args="true"/>
+
+    <group ns="$(arg name_space)">
+        <param name="tdoa_available" type="bool" value="$(arg tdoa_available)" />
+        <param name="twr_available" type="bool" value="$(arg twr_available)" />
+        <param name="bt_aoa_available" type="bool" value="$(arg bt_aoa_available)" />
+        <!-- <node name="$(anon logger)" pkg="follow_me" type="logger.py" output="screen"/> -->
+        <node name="$(anon velocity_ctrl)" pkg="follow_me" type="velocity_ctrl.py" args="$(arg follow_distance)" output="screen" required='true'/>
+    </group>
+
+    <group ns="radio">
+        <rosparam command="load" file="$(find follow_me)/config/radio.yaml"/>
+        <node name="$(anon radio_locator)" pkg="follow_me" type="radio_locator.py" output="screen" required='true'/>
+    </group>
+</launch>
