@@ -7,13 +7,11 @@ import tf2_ros
 from geometry_msgs.msg import (
     TransformStamped,
     Point,
-    Vector3,
     PoseWithCovarianceStamped,
 )
 from dwm1001c_ros.msg import UWBMeas
 from std_msgs.msg import Bool, String
 from follow_me.msg import PositionEstimate
-from geometry_msgs.msg import Point
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -93,7 +91,9 @@ class Kalman:
             np.linalg.inv(np.matmul(np.matmul(self.H, self.x_cov), self.H.T) + self.R),
         )
         self.x = self.x + np.matmul(K, measurement - np.matmul(self.H, self.x))
-        self.x_cov = np.matmul(np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov)
+        self.x_cov = np.matmul(
+            np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov
+        )
 
         # self.x[3:5,:] = np.clip(self.x[3:5,:], -0.05, 0.05)
         # self.x[5:7,:] = np.clip(self.x[5:7,:], -0.1, 0.1)
@@ -108,6 +108,7 @@ class Locator:
         self.human_frame = rospy.get_param("human_frame")
         self.use_3d = rospy.get_param("use_3d")
         self.mount_height = rospy.get_param("mount_height")
+        self.target = rospy.get_param("target")
         if not self.use_3d:
             rospy.logwarn("TWR localisation is set to operate just in the x-y plane")
         self.br = tf2_ros.TransformBroadcaster()
@@ -130,7 +131,7 @@ class Locator:
         self.ranges = {}
         self.ranges_avg = {}
         self.uwb_stamps = {}
-        self.lp_filter = butter(3, CUTOFF/(2*np.pi))
+        self.lp_filter = butter(3, CUTOFF / (2 * np.pi))
         self.zi = {}
         for i in range(len(self.ids)):
             id = self.ids[i]
@@ -163,9 +164,7 @@ class Locator:
 
         self.last_pos = np.array([np.nan, np.nan])
 
-        self.filter = Kalman(
-            np.array([[0], [0], [0], [0], [0]]), np.eye(5), 0.1
-        )
+        self.filter = Kalman(np.array([[0], [0], [0], [0], [0]]), np.eye(5), 0.1)
         self.initialised = False
 
         self.started = False
@@ -187,8 +186,10 @@ class Locator:
         rospy.sleep(0.5)
 
     def range_cb(self, msg, id):
-        if len(msg.measurements) != 0:
-            d = msg.measurements[0].dist
+        for m in msg.measurements:
+            if m.id != self.target:
+                continue
+            d = m.dist
             self.ranges[id] = d
             p = self.calibration[id]
             d_cal = p[0] * d**3 + p[1] * d**2 + p[2] * d + p[3]
@@ -246,12 +247,17 @@ class Locator:
             if self.use_3d:
                 x, y, z = g
                 f = (x - x_t) ** 2 + (y - y_t) ** 2 + (z - z_t) ** 2 - d**2
-                f_prev = (x-guess[0])**2+(y-guess[1])**2+(z-guess[2])**2
+                f_prev = (x - guess[0]) ** 2 + (y - guess[1]) ** 2 + (z - guess[2]) ** 2
             else:
                 x, y = g
-                f = (x - x_t) ** 2 + (y - y_t) ** 2 + (self.mount_height - z_t) ** 2 - d**2
-                f_prev = (x-guess[0])**2+(y-guess[1])**2
-            
+                f = (
+                    (x - x_t) ** 2
+                    + (y - y_t) ** 2
+                    + (self.mount_height - z_t) ** 2
+                    - d**2
+                )
+                f_prev = (x - guess[0]) ** 2 + (y - guess[1]) ** 2
+
             f = w_t * f
             # f_w = w * f
             # f = np.vstack((f,0.3*f_prev))
@@ -284,7 +290,9 @@ class Locator:
                     [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
                 )
             else:
-                self.last_pos = np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])
+                self.last_pos = np.array(
+                    [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]]
+                )
         x = self.intersectionPoint(self.last_pos)
         if x is None:
             rospy.logwarn("intersection point not found")
@@ -293,9 +301,7 @@ class Locator:
             x = np.concatenate((x, np.array([self.mount_height])))
 
         if not self.initialised:
-            self.filter.set_initial(
-                np.array([[x[0]], [x[1]], [x[2]]]), np.eye(3)
-            )
+            self.filter.set_initial(np.array([[x[0]], [x[1]], [x[2]]]), np.eye(3))
             self.initialised = True
         else:
             self.filter.correct(np.array([[x[0]], [x[1]], [x[2]]]))
@@ -338,7 +344,7 @@ class Locator:
             d_meas = d[i]
             pos = self.positions[id]
             if not self.use_3d:
-                pos = pos[:2,:]
+                pos = pos[:2, :]
             d_pred = np.linalg.norm(pos - self.last_pos[:, None])
             w = 1 / (100 * (d_meas - d_pred) ** 2 + 1e-4)
             weights += [w]

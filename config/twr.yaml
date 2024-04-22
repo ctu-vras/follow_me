@@ -1,6 +1,7 @@
 fixed_frame: "locator"
 human_frame: "twr_position"
 use_3d: false
+target: "DA12"
 
 ids: [
   "5722",

@@ -144,6 +144,7 @@ class Locator:
         self.ids = rospy.get_param("/uwb/twr/ids")
         self.coords = rospy.get_param("/uwb/twr/positions")
         self.coeffs = rospy.get_param("/uwb/twr/calibration")
+        self.target = rospy.get_param("/uwb/twr/target")
         self.positions = {}
         self.calibration = {}
         self.subscribers = {}
@@ -151,7 +152,7 @@ class Locator:
         self.ranges = {}
         self.ranges_avg = {}
         self.uwb_stamps = {}
-        self.lp_filter = butter(3, CUTOFF/(2*np.pi))
+        self.lp_filter = butter(3, CUTOFF / (2 * np.pi))
         self.zi = {}
         for i in range(len(self.ids)):
             id = self.ids[i]
@@ -251,8 +252,10 @@ class Locator:
             raise ValueError("argument out should be 'matrix' or 'tf'")
 
     def range_cb(self, msg, id):
-        if len(msg.measurements) != 0:
-            d = msg.measurements[0].dist
+        for m in msg.measurements:
+            if m.id != self.target:
+                continue
+            d = m.dist
             self.ranges[id] = d
             p = self.calibration[id]
             d_cal = p[0] * d**3 + p[1] * d**2 + p[2] * d + p[3]
@@ -339,10 +342,10 @@ class Locator:
 
             # AOA
             n = np.array([[np.cos(angles[0])], [np.sin(angles[0])], [0]])
-            p = np.matmul(tf,np.array([[x], [y], [0], [1]]))[:3, :]
+            p = np.matmul(tf, np.array([[x], [y], [0], [1]]))[:3, :]
             p[2, :] = 0.0
             angle = get_angle(n, p, np.array([[0.0], [0.0], [1.0]]))
-            f = np.vstack((f, 3.*np.abs(float(angle))))
+            f = np.vstack((f, 3.0 * np.abs(float(angle))))
 
             # no large jumps between iterations
             # if self.use_3d:
