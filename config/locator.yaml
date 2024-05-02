@@ -4,6 +4,7 @@ human_frame: "position"
 allow_backwards_motion: true
 follow_distance: 1.6
 safe_distance: 1.3
+follow_frame: "position_cube"
 
 tdoa_prefix: "/uwb/tdoa/"
 twr_prefix: "/uwb/twr/"

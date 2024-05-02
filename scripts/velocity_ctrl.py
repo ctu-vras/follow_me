@@ -22,9 +22,7 @@ class PurePursuit:
         self.base_frame = "body"
         self.odom_frame = "vision"
         self.cmd_topic = "/nav/cmd_vel"
-        # self.pos_frame = rospy.get_param("/uwb/twr/human_frame")
-        # self.pos_frame = rospy.get_param("/radio/human_frame")
-        self.pos_frame = "position_cube"
+        self.pos_frame = rospy.get_param("follow_frame")
         self.ready_topic = "/detection_ready"
 
         self.follow_distance = rospy.get_param("follow_distance")
