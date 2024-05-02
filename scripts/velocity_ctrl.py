@@ -19,9 +19,9 @@ class PurePursuit:
         rospy.init_node("pure_pursuit", anonymous=True)
         rospy.sleep(0.2)
 
-        self.base_frame = "body"
-        self.odom_frame = "vision"
-        self.cmd_topic = "/nav/cmd_vel"
+        self.base_frame = rospy.get_param("base_frame")
+        self.odom_frame = rospy.get_param("odom_frame")
+        self.cmd_topic = rospy.get_param("cmd_topic")
         self.pos_frame = rospy.get_param("follow_frame")
         self.ready_topic = "/detection_ready"
 
