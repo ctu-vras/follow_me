@@ -16,4 +16,8 @@
     <include file="$(find dwm1001_ros)/launch/tag_node.launch" pass_all_args="true">
         <arg name="usb_port" value="/dev/ttyACM_uwbc4b5"/>
     </include>
+    
+    <include file="$(find dwm1001_ros)/launch/tag_node.launch" pass_all_args="true">
+        <arg name="usb_port" value="/dev/ttyACM_uwbc694"/>
+    </include>
 </launch>
