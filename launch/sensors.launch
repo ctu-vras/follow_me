@@ -18,7 +18,6 @@
 
     <group if="$(arg bt_aoa_available)" ns="$(arg aoa_ns)">
         <include file="$(find follow_me)/launch/aoa.launch"/>
-        <!-- <node name="$(anon aoa_locator)" pkg="follow_me" type="aoa_locator.py" output="screen" required='true'/> -->
         <node name="$(anon aoa_locator)" pkg="follow_me" type="aoa_locator.py" output="screen" required='true'/>
     </group>
 </launch>
