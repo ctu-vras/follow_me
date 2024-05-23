@@ -18,9 +18,9 @@ from scipy.optimize import least_squares
 from scipy.signal import lfilter, lfilter_zi, butter
 from collections import deque
 
-R_const = 50
+R_const = 70
 Q_const = 1
-CUTOFF = 3.0
+CUTOFF = 4.0
 
 np.set_printoptions(precision=3)
 
@@ -260,7 +260,7 @@ class Locator:
 
             f = w_t * f
             # f_w = w * f
-            # f = np.vstack((f,0.3*f_prev))
+            f = np.vstack((f,0.3*f_prev))
 
             return f.flatten().tolist()
 
