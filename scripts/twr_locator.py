@@ -201,7 +201,7 @@ class Locator:
             self.ranges_avg[id] = float(d_filt)
             self.uwb_stamps[id] = rospy.get_time()
 
-    def intersectionPoint(self, guess):
+    def intersectionPoint(self, guess, init, p_init):
         x_t = []
         y_t = []
         z_t = []
@@ -264,12 +264,22 @@ class Locator:
 
             return f.flatten().tolist()
 
-        ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
-
-        if ans.success:
-            return ans.x
+        if init:
+            best = None
+            cost = np.inf
+            for p in p_init:
+                ans = least_squares(eq, p, loss="soft_l1", verbose=0)
+                if ans.success and ans.cost < cost:
+                    best = ans.x
+                    cost = ans.cost
+            return best
         else:
-            return None
+            ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
+
+            if ans.success:
+                return ans.x
+            else:
+                return None
 
     def publish_pose(self, _):
         for id in self.ids:
@@ -283,17 +293,30 @@ class Locator:
             self.started = True
 
         # find the intersection point
+        init = False
+        p_init = []
         if np.any(np.isnan(self.last_pos)):
             p = self.positions[self.ids[0]]
             if self.use_3d:
-                self.last_pos = np.array(
+                p_init += np.array(
                     [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
                 )
-            else:
-                self.last_pos = np.array(
-                    [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]]
+                p_init += np.array(
+                    [p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]]
                 )
-        x = self.intersectionPoint(self.last_pos)
+                p_init += np.array(
+                    [p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
+                )
+                p_init += np.array(
+                    [p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]]
+                )
+            else:
+                p_init += np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])
+                p_init += np.array([p[0][0], p[1][0]] + self.ranges_avg[self.ids[0]])
+                p_init += np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0]])
+                p_init += np.array([p[0][0], p[1][0]] - self.ranges_avg[self.ids[0]])
+            init = True
+        x = self.intersectionPoint(self.last_pos, init, p_init)
         if x is None:
             rospy.logwarn("intersection point not found")
             return

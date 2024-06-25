@@ -7,7 +7,6 @@ import tf2_ros
 from geometry_msgs.msg import (
     TransformStamped,
     Point,
-    Vector3,
     PoseWithCovarianceStamped,
 )
 from dwm1001_ros.msg import UWBMeas
@@ -23,7 +22,6 @@ import tf2_ros
 import tf2_py as tf2
 import ros_numpy
 import genpy
-import time
 
 R_const = 20
 Q_const = 1
@@ -129,7 +127,7 @@ class Locator:
         self.use_3d = rospy.get_param("use_3d")
         self.mount_height = rospy.get_param("mount_height")
         if not self.use_3d:
-            rospy.logwarn("TWR localisation is set to operate just in the x-y plane")
+            rospy.logwarn("radio localisation is set to operate just in the x-y plane")
         self.br = tf2_ros.TransformBroadcaster()
         self.t = TransformStamped()
         self.t.header.frame_id = self.fixed_frame
@@ -270,7 +268,7 @@ class Locator:
     def angle_cb(self, msg):
         self.heading_estimate = msg
 
-    def intersectionPoint(self, guess):
+    def intersectionPoint(self, guess, init, p_init):
         if self.heading_estimate is None:
             rospy.logwarn("No estimate available")
             return None
@@ -356,12 +354,22 @@ class Locator:
 
             return f.flatten().tolist()
 
-        ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
-
-        if ans.success:
-            return ans.x
+        if init:
+            best = None
+            cost = np.inf
+            for p in p_init:
+                ans = least_squares(eq, p, loss="soft_l1", verbose=0)
+                if ans.success and ans.cost < cost:
+                    best = ans.x
+                    cost = ans.cost
+            return best
         else:
-            return None
+            ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
+
+            if ans.success:
+                return ans.x
+            else:
+                return None
 
     def publish_pose(self, _):
         for id in self.ids:
@@ -370,17 +378,30 @@ class Locator:
                 return
 
         # find the intersection point
+        init = False
+        p_init = []
         if np.any(np.isnan(self.last_pos)):
             p = self.positions[self.ids[0]]
             if self.use_3d:
-                self.last_pos = np.array(
+                p_init += np.array(
                     [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
                 )
-            else:
-                self.last_pos = np.array(
-                    [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]]
+                p_init += np.array(
+                    [p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]]
                 )
-        x = self.intersectionPoint(self.last_pos)
+                p_init += np.array(
+                    [p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
+                )
+                p_init += np.array(
+                    [p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]]
+                )
+            else:
+                p_init += np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])
+                p_init += np.array([p[0][0], p[1][0]] + self.ranges_avg[self.ids[0]])
+                p_init += np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0]])
+                p_init += np.array([p[0][0], p[1][0]] - self.ranges_avg[self.ids[0]])
+            init = True
+        x = self.intersectionPoint(self.last_pos, init, p_init)
         if x is None:
             rospy.logwarn("intersection point not found")
             return

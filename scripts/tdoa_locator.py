@@ -299,15 +299,25 @@ class Locator:
                 np.sqrt((x - x_t1_tdoa) ** 2 + (y - y_t1_tdoa) ** 2)
                 - np.sqrt((x - x_t2_tdoa) ** 2 + (y - y_t2_tdoa) ** 2)
                 - d_tdoa
-            )
-            f_tdoa = w * f_tdoa
-            f = np.vstack((f_tdoa, 2 * (np.linalg.norm(g) - 1)))
+            ) ** 2
+            # f_tdoa = w * f_tdoa
+            f = np.vstack((f_tdoa, 10 * (np.linalg.norm(g) - 1)))
             # if last is not None:
             #     f = np.vstack((f, 0.5 * np.linalg.norm(g - last)))
             return f.flatten().tolist()
 
         # print(guess)
-        ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
+        gu = [np.array([1, 0]), np.array([0, 1]), np.array([-1, 1]), np.array([0, -1])]
+        best = None
+        cost = np.inf
+        for g in gu:
+            ans = least_squares(eq, g, loss="soft_l1", verbose=0)
+            if ans.success and ans.cost < cost:
+                best = ans.x
+                cost = ans.cost
+        return best
+
+        # ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
 
         if ans.success:
             return ans.x
@@ -332,7 +342,7 @@ class Locator:
             a1 = self.positions[id1]
             a2 = self.positions[id2]
             d_a2a = np.linalg.norm(a1 - a2)
-            diff = self.calib[id1](C * (stamps[id1] - stamps[id2]))
+            # diff = self.calib[id1](C * (stamps[id1] - stamps[id2]))
 
             if diff > d_a2a:
                 diff = d_a2a
@@ -365,6 +375,7 @@ class Locator:
             self.filter.correct(np.array([[est[0]], [est[1]]]))
             est, est_cov = self.filter.predict()
             est = est.flatten()
+        self.last_estimate = est
         Va = np.array([[1.0], [0.0], [0.0]])
         Vb = np.array([[est[0]], [est[1]], [0.0]])
         Vn = np.array([[0.0], [0.0], [1.0]])

@@ -38,7 +38,6 @@ catkin_package(
 #  DEPENDS system_lib
 )
 
-# FIXME: keep the list updated with new files and names
 catkin_install_python(PROGRAMS
     scripts/aoa_locator.py
     scripts/cube_locator.py
