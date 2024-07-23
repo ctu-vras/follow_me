@@ -383,23 +383,24 @@ class Locator:
         if np.any(np.isnan(self.last_pos)):
             p = self.positions[self.ids[0]]
             if self.use_3d:
-                p_init += np.array(
-                    [p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
-                )
-                p_init += np.array(
-                    [p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]]
-                )
-                p_init += np.array(
-                    [p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]]
-                )
-                p_init += np.array(
-                    [p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]]
-                )
+                p_init += [
+                    np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])
+                ]
+                p_init += [
+                    np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]])
+                ]
+                p_init += [
+                    np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])
+                ]
+                p_init += [
+                    np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]])
+                ]
             else:
-                p_init += np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])
-                p_init += np.array([p[0][0], p[1][0]] + self.ranges_avg[self.ids[0]])
-                p_init += np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0]])
-                p_init += np.array([p[0][0], p[1][0]] - self.ranges_avg[self.ids[0]])
+                print(self.ranges_avg[self.ids[0]])
+                p_init += [np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])]
+                p_init += [np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]]])]
+                p_init += [np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0]])]
+                p_init += [np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]]])]
             init = True
         x = self.intersectionPoint(self.last_pos, init, p_init)
         if x is None:
