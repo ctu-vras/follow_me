@@ -1,0 +1,21 @@
+name: uwb
+root: /home/herolada/ws_k
+
+startup_window: position
+pre_window: export ROS_DISTRO=kilted; source ~/ws_k/install/setup.bash
+
+windows:
+  - uwb_twr:
+      panes:
+        - |
+          ros2 launch dwm1001_ros four_tags.launch.py
+  - bt_aoa:
+      panes:
+        - |
+          ros2 launch xplraoa_ros anchor_node.launch.py
+  - position:
+      panes:
+        - |
+          ros2 launch follow_me twr.launch.py
+        - |
+          ros2 launch follow_me aoa.launch.py

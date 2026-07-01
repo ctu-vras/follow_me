@@ -1,0 +1,49 @@
+# Parameters for the aoa_locator node.
+/**:
+  ros__parameters:
+    fixed_frame: "aoa"
+    estimate_frame: "twr_position"
+    mode: "RSSI"
+
+    ids:
+      - "bt_an0"
+      # - "an2"
+      # - "an3"
+      # - "an4"
+
+    # x, y, z, qx, qy, qz, qw per anchor (flat list)
+    positions:
+      - 0.065
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      # - 0.0
+      # - -0.065
+      # - 0.0
+      # - 0.0
+      # - 0.0
+      # - -0.7071068
+      # - 0.7071068
+      # - -0.065
+      # - 0.0
+      # - 0.0
+      # - 0.0
+      # - 0.0
+      # - 1.0
+      # - 0.0
+      # - 0.0
+      # - 0.065
+      # - 0.0
+      # - 0.0
+      # - 0.0
+      # - 0.7071068
+      # - 0.7071068
+
+    frames:
+      - "aoa1"
+      # - "aoa2"
+      # - "aoa3"
+      # - "aoa4"

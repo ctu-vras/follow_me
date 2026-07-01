@@ -1,0 +1,42 @@
+# Parameters for the tdoa_locator node (and the external uwb_tdoa driver).
+# The twr_* parameters are injected by the launch file from twr.yaml.
+# server.*, master and anchors.sn are consumed by the external driver, not the
+# locator (the locator ignores parameters it does not declare).
+/**:
+  ros__parameters:
+    fixed_frame: "locator"
+    num_anchors: 3
+
+    server:
+      address: "192.168.10.250"
+      port: 6666
+
+    master: "0000000000002000"
+
+    anchors:
+      address:
+        - "0000000000002000"
+        - "0000000000002002"
+        - "0000000000002001"
+      sn:
+        - "05"
+        - "49"
+        - "17"
+      # x, y, z per anchor (flat list)
+      position:
+        - 0.29
+        - 0.165
+        - 0.135
+        - 0.29
+        - -0.165
+        - 0.135
+        - -0.37
+        - 0.0
+        - 0.135
+
+    target:
+      tags:
+        - "5a84"
+        - "5722"
+        - "c4b5"
+      anchor: "da12"
