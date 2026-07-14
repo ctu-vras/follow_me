@@ -39,6 +39,7 @@ def generate_launch_description():
     follow_distance = LaunchConfiguration("follow_distance")
     name_space = LaunchConfiguration("name_space")
     mount_height = LaunchConfiguration("mount_height")
+    max_msg_delay = LaunchConfiguration("max_msg_delay")
 
     twr_shared = load_twr_shared()
 
@@ -49,6 +50,7 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument("twr_available", default_value="true"))
     ld.add_action(DeclareLaunchArgument("bt_aoa_available", default_value="true"))
     ld.add_action(DeclareLaunchArgument("mount_height", default_value="0.0"))
+    ld.add_action(DeclareLaunchArgument("max_msg_delay", default_value="0.3"))
 
     ld.add_action(
         Node(
@@ -110,7 +112,10 @@ def generate_launch_description():
                     parameters=[
                         radio_cfg,
                         twr_shared,
-                        {"mount_height": ParameterValue(mount_height, value_type=float)},
+                        {
+                            "mount_height": ParameterValue(mount_height, value_type=float),
+                            "max_msg_delay": ParameterValue(max_msg_delay, value_type=float),
+                        },
                     ],
                 ),
             ]

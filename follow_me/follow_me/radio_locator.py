@@ -12,16 +12,17 @@ from scipy.optimize import least_squares
 from scipy.signal import lfilter, lfilter_zi, butter
 
 from tf2_ros import Buffer, TransformBroadcaster, TransformListener
-from geometry_msgs.msg import TransformStamped, Point, PoseWithCovarianceStamped
+from geometry_msgs.msg import TransformStamped, Point, PoseWithCovarianceStamped, PoseStamped
 from dwm1001_ros_interfaces.msg import UWBMeas
 from std_msgs.msg import Bool, String
 from follow_me_interfaces.msg import PositionEstimate, HeadingEstimate
 
-from follow_me.utils import get_angle, get_transform
+from follow_me.utils import get_transform
 
 R_const = 20
 Q_const = 1
 CUTOFF = 3.0
+fs = 10
 
 np.set_printoptions(precision=3)
 
@@ -79,7 +80,9 @@ class Locator(Node):
         self.declare_parameter("fixed_frame", Parameter.Type.STRING)
         self.declare_parameter("human_frame", Parameter.Type.STRING)
         self.declare_parameter("use_3d", False)
+        self.declare_parameter("use_aoa", False)
         self.declare_parameter("mount_height", 0.0)
+        self.declare_parameter("max_msg_delay", 0.3)
         # values mirrored from the /uwb/twr node parameters (supplied via launch)
         self.declare_parameter("twr_ids", Parameter.Type.STRING_ARRAY)
         self.declare_parameter("twr_positions", Parameter.Type.DOUBLE_ARRAY)
@@ -89,7 +92,9 @@ class Locator(Node):
         self.fixed_frame = self.get_parameter("fixed_frame").value
         self.human_frame = self.get_parameter("human_frame").value
         self.use_3d = self.get_parameter("use_3d").value
+        self.use_aoa = self.get_parameter("use_aoa").value
         self.mount_height = self.get_parameter("mount_height").value
+        self.max_msg_delay = self.get_parameter("max_msg_delay").value
         if not self.use_3d:
             self.get_logger().warn(
                 "radio localisation is set to operate just in the x-y plane"
@@ -116,7 +121,7 @@ class Locator(Node):
         self.ranges = {}
         self.ranges_avg = {}
         self.uwb_stamps = {}
-        self.lp_filter = butter(3, CUTOFF / (2 * np.pi))
+        self.lp_filter = butter(3, CUTOFF, fs=fs)
         self.zi = {}
         for i in range(len(self.ids)):
             id = self.ids[i]
@@ -145,11 +150,16 @@ class Locator(Node):
 
         # AoA
         self.heading_estimate = None
-        self.heading_subs = self.create_subscription(
-            HeadingEstimate, "/bluetooth/aoa/angle", self.angle_cb, 1
-        )
+        self.heading_stamp = None
+        if self.use_aoa:
+            self.heading_subs = self.create_subscription(
+                HeadingEstimate, "/bluetooth/aoa/angle", self.angle_cb, 1
+            )
 
-        self.last_pos = np.array([np.nan, np.nan])
+        if self.use_3d:
+            self.last_pos = np.array([np.nan, np.nan, np.nan])
+        else:
+            self.last_pos = np.array([np.nan, np.nan])
 
         self.filter = Kalman(np.array([[0], [0], [0], [0], [0]]), np.eye(5), 0.1)
         self.initialised = False
@@ -157,6 +167,7 @@ class Locator(Node):
         self.started = False
         self.pub = self.create_publisher(Bool, "/detection_ready", 1)
         self.estimate_pub = self.create_publisher(PositionEstimate, "estimate", 1)
+        self.pose_pub = self.create_publisher(PoseStamped, "estimate_pose", 1)
         self.sound_pub = self.create_publisher(String, "/log_sound", 1)
 
         self.get_logger().info("Waiting for average value of the measurements")
@@ -190,11 +201,13 @@ class Locator(Node):
 
     def angle_cb(self, msg):
         self.heading_estimate = msg
+        self.heading_stamp = self.now_sec()
 
     def intersectionPoint(self, guess, init, p_init):
-        if self.heading_estimate is None:
+        if self.use_aoa and self.heading_estimate is None:
             self.get_logger().warn("No estimate available")
             return None
+        valid_ids = []
         x_t = []
         y_t = []
         z_t = []
@@ -204,45 +217,73 @@ class Locator(Node):
         t = self.now_sec()
         for i in range(len(self.ids)):
             id = self.ids[i]
+            meas_age = t - self.uwb_stamps[id]
+            if meas_age > self.max_msg_delay:
+                self.get_logger().error(
+                    "Measurement from TWR tag %s is more than %.2f seconds old, disregarding it"
+                    % (id, self.max_msg_delay)
+                )
+                id_mod = ""
+                for j in range(len(id) - 1):
+                    id_mod += id[j] + " "
+                id_mod += id[-1]
+                s = String(
+                    data="Warning: Measurement from T W R tag %s is more than %.2f seconds old"
+                    % (id_mod, self.max_msg_delay)
+                )
+                self.sound_pub.publish(s)
+                continue
+            valid_ids += [id]
             x_t += [[self.positions[id][0][0]]]
             y_t += [[self.positions[id][1][0]]]
             z_t += [[self.positions[id][2][0]]]
             d += [[self.ranges_avg[id]]]
-            age += [t - self.uwb_stamps[id]]
-            if age[-1] > 0.3:
-                self.get_logger().error(
-                    "Measurement from TWR tag %s is more than 0.3 seconds old" % (id)
-                )
-                id_mod = ""
-                for i in range(len(id) - 1):
-                    id_mod += id[i] + " "
-                id_mod += id[-1]
-                s = String(
-                    data="Warning: Measurement from T W R tag %s is more than 0.3 seconds old"
-                    % (id_mod)
-                )
-                self.sound_pub.publish(s)
-        angles = [self.heading_estimate.azimuth, self.heading_estimate.elevation]
-        angles_frame = self.heading_estimate.header.frame_id
-        tf = get_transform(self, self.tf_buffer, angles_frame, self.fixed_frame)
-        if tf is None:
-            self.get_logger().fatal(
-                "No transform between %s and %s" % (self.fixed_frame, angles_frame)
+            age += [meas_age]
+
+        if len(valid_ids) < 3:
+            self.get_logger().error(
+                "Not enough up-to-date TWR measurements (%d) to solve for the position, "
+                "at least 3 are required" % len(valid_ids)
             )
             return None
+
+        use_aoa_now = False
+        tf = None
+        angles = None
+        if self.use_aoa:
+            heading_age = t - self.heading_stamp
+            if heading_age > self.max_msg_delay:
+                self.get_logger().warn(
+                    "AoA heading estimate is more than %.2f seconds old, disregarding it"
+                    % self.max_msg_delay
+                )
+            else:
+                angles = [self.heading_estimate.azimuth, self.heading_estimate.elevation]
+                angles_frame = self.heading_estimate.header.frame_id
+                tf = get_transform(self, self.tf_buffer, angles_frame, self.fixed_frame)
+                if tf is None:
+                    self.get_logger().fatal(
+                        "No transform between %s and %s" % (self.fixed_frame, angles_frame)
+                    )
+                    return None
+                use_aoa_now = True
 
         x_t = np.array(x_t)
         y_t = np.array(y_t)
         z_t = np.array(z_t)
         d = np.array(d)
 
-        w = self.weighting_function(d)
+        w = self.weighting_function(d, valid_ids)
 
         # weight based on how old is the measurement
-        w_t = np.zeros((len(self.ids), 1))
-        for i in range(len(self.ids)):
+        w_t = np.zeros((len(valid_ids), 1))
+        for i in range(len(valid_ids)):
             if age[i] < 1.0:
                 w_t[i, 0] = min(age) / age[i]
+        w_t = np.minimum(w_t, 0.5) # let the maximum difference in magnitude be 2 -> otherwise it could happen, that one measurement overtakes all just because of unlucky timing
+        # # w_t = 0.01*np.ones((len(valid_ids), 1))
+
+        print(f"age weights {w_t}")
 
         def eq(g):
             # TWR
@@ -260,12 +301,16 @@ class Locator(Node):
 
             f = w_t * f  # weighting based on the age of the measurement
 
-            # AOA
-            n = np.array([[np.cos(angles[0])], [np.sin(angles[0])], [0]])
-            p = np.matmul(tf, np.array([[x], [y], [0], [1]]))[:3, :]
-            p[2, :] = 0.0
-            angle = get_angle(n, p, np.array([[0.0], [0.0], [1.0]]))
-            f = np.vstack((f, 3.0 * np.abs(float(angle))))
+            if use_aoa_now:
+                # AOA
+                # perpendicular distance (in 2D) between the candidate point and the
+                # ray originating at the AoA sensor with direction given by the
+                # measured azimuth angle
+                n = np.array([[np.cos(angles[0])], [np.sin(angles[0])]])
+                p = np.matmul(tf, np.array([[x], [y], [0], [1]]))[:2, :]
+                dist = float(n[0, 0] * p[1, 0] - n[1, 0] * p[0, 0])
+                self.get_logger().info(f"aoa {angles[0]}\n aoa pose {n}\n pose {p}\n DIST {dist}")
+                f = np.vstack((f, 3.0 * dist))
 
             return f.flatten().tolist()
 
@@ -280,6 +325,8 @@ class Locator(Node):
             return best
         else:
             ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
+            self.get_logger().info(f"success: {ans.success}, {ans.status}, {ans.message}")
+            self.get_logger().info(f"final residual (incl. AoA): {ans.fun} result pose {ans.x}")
 
             if ans.success:
                 return ans.x
@@ -352,6 +399,13 @@ class Locator(Node):
         est.position_estimate = Point(x=float(x[0]), y=float(x[1]), z=float(x[2]))
         self.estimate_pub.publish(est)
 
+        pose = PoseStamped()
+        pose.header.frame_id = self.fixed_frame
+        pose.header.stamp = est.header.stamp
+        pose.pose.position = Point(x=float(x[0]), y=float(x[1]), z=float(x[2]))
+        pose.pose.orientation.w = 1.0
+        self.pose_pub.publish(pose)
+
         # send tf
         self.t.header.stamp = self.get_clock().now().to_msg()
         self.t.transform.translation.x = float(x[0])
@@ -364,10 +418,10 @@ class Locator(Node):
             self.pub.publish(Bool(data=True))
             self.started = True
 
-    def weighting_function(self, d):
+    def weighting_function(self, d, ids):
         weights = []
-        for i in range(len(self.ids)):
-            id = self.ids[i]
+        for i in range(len(ids)):
+            id = ids[i]
             d_meas = d[i]
             pos = self.positions[id]
             if not self.use_3d:

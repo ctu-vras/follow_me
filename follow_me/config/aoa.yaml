@@ -13,7 +13,7 @@
 
     # x, y, z, qx, qy, qz, qw per anchor (flat list)
     positions:
-      - 0.065
+      - 0.460
       - 0.0
       - 0.0
       - 0.0

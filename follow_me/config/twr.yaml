@@ -9,24 +9,25 @@
     target: "DA12"
 
     ids:
-      - "401A"
-      - "5434"
-      - "C580"
-      - "D433"
+      - "45B0"  #levej predni
+      - "D433"  #pravej predni
+      - "5434"  #levej zadni
+      - "401A"  #pravej zadni
 
     # x, y, z per tag (flat list)
+    # 920, 520, 200
     positions:
-      - 0.175
-      - 0.075
-      - 0.115
-      - -0.07
-      - -0.04
-      - 0.093
-      - -0.30
-      - 0.08
-      - 0.098
+      - 0.460
+      - 0.260
       - 0.0
+      - 0.460
+      - -0.260
       - 0.0
+      - -0.460
+      - 0.100
+      - 0.0
+      - -0.460
+      - -0.100
       - 0.0
 
     # 4 polynomial coefficients per tag (flat list)

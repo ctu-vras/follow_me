@@ -136,7 +136,10 @@ class Locator(Node):
             )
             self.zi[id] = lfilter_zi(self.lp_filter[0], self.lp_filter[1])
 
-        self.last_pos = np.array([np.nan, np.nan])
+        if self.use_3d:
+            self.last_pos = np.array([np.nan, np.nan, np.nan])
+        else:
+            self.last_pos = np.array([np.nan, np.nan])
 
         self.filter = Kalman(np.array([[0], [0], [0], [0], [0]]), np.eye(5), 0.1)
         self.initialised = False
