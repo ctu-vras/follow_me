@@ -262,6 +262,7 @@ class Locator(Node):
         t = get_transform(self, self.tf_buffer, self.fixed_frame, self.frames[selected_id])
         if t is None:
             return
+        antenna_origin = t[:3, 3:4]
         p = np.matmul(t, np.vstack((p, np.array([[1]]))))[:3, :]
         if not self.initialised:
             self.filter.set_initial(p, np.eye(3))
@@ -269,16 +270,17 @@ class Locator(Node):
         else:
             self.filter.correct(p)
             x_new, cov = self.filter.predict()
-            x_new /= np.linalg.norm(x_new)
+            direction = x_new - antenna_origin
+            direction /= np.linalg.norm(direction)
 
             Va = np.array([[1], [0], [0]])
             Vn1 = np.array([[0], [0], [1]])
-            az_f = get_angle(Va, x_new, Vn1)
+            az_f = get_angle(Va, direction, Vn1)
 
             cc = np.cos(-az_f)
             s = np.sin(-az_f)
             t2 = np.array([[cc, -s, 0], [s, cc, 0], [0, 0, 1]])
-            x2 = np.matmul(t2, x_new)
+            x2 = np.matmul(t2, direction)
             Vn2 = np.array([[0], [1], [0]])
             el_f = get_angle(x2, Va, Vn2)
 
