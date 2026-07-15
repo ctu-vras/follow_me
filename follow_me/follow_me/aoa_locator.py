@@ -15,57 +15,18 @@ from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, TransformStamped, Quaternion, Vector3
 from follow_me_interfaces.msg import HeadingEstimate
 
-from follow_me.utils import get_angle, get_transform
+from follow_me.utils import (
+    Kalman,
+    attach_kalman_param_callback,
+    declare_kalman_parameters,
+    get_angle,
+    get_transform,
+)
 
 ANGLE_LIMIT = np.deg2rad(70.0)
 CUTOFF = 1.0
 Q_LEN = 5
 BEST_LEN = 3
-R = 10
-Q = 1
-
-
-class Kalman:
-    def __init__(self, x0, P0, dt):
-        self.x = x0
-        self.x_cov = P0
-        self.dt = dt
-        self.A = np.array(
-            [
-                [1, 0, 0],
-                [0, 1, 0],
-                [0, 0, 1],
-            ]
-        )
-        self.Q = Q * np.eye(3)
-        self.R = R * np.eye(3)
-        self.H = np.array(
-            [
-                [1, 0, 0],
-                [0, 1, 0],
-                [0, 0, 1],
-            ]
-        )
-
-    def set_initial(self, x0, P0):
-        self.x = x0
-        self.x_cov = P0
-
-    def predict(self):
-        self.x = np.matmul(self.A, self.x)
-        self.x_cov = np.matmul(np.matmul(self.A, self.x_cov), self.A.T) + self.Q
-        return self.x, self.x_cov
-
-    def correct(self, measurement):
-        K = np.matmul(
-            np.matmul(self.x_cov, self.H.T),
-            np.linalg.inv(np.matmul(np.matmul(self.H, self.x_cov), self.H.T) + self.R),
-        )
-        self.x = self.x + np.matmul(K, measurement - np.matmul(self.H, self.x))
-        self.x_cov = np.matmul(
-            np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov
-        )
-        return self.x, self.x_cov
 
 
 class Locator(Node):
@@ -176,7 +137,18 @@ class Locator(Node):
         self.marker.pose.orientation.w = 1.0
 
         # Kalman
-        self.filter = Kalman(np.array([[0], [0], [0]]), np.eye(3), 0.1)
+        # r is scaled to the state itself (a unit direction vector, not meters):
+        # the previous r=10 was ~30x the state's own magnitude, which (combined
+        # with the predict/correct ordering bug) made the innovation gate below
+        # essentially never fire - any jump looked statistically unremarkable
+        # next to noise that huge. gate_threshold/max_inflation control how
+        # aggressively real jumps (e.g. the robot turning suddenly) get absorbed
+        # in ~1-2 cycles instead of smoothed away over seconds; q is the nominal
+        # per-second process noise for calm conditions.
+        kalman_params = declare_kalman_parameters(self, q=1.0, r=0.05)
+        self.filter = Kalman(np.array([[0.0], [0.0], [0.0]]), np.eye(3), **kalman_params)
+        attach_kalman_param_callback(self, self.filter)
+        self.filter_last_time = None
         self.initialised = False
 
         # start the desired localisation method
@@ -187,6 +159,9 @@ class Locator(Node):
         else:
             self.get_logger().error("Invalid mode specified, using RSSI")
             self.tim = self.create_timer(0.05, self.estimate_angle_rssi)
+
+    def now_sec(self):
+        return self.get_clock().now().nanoseconds * 1e-9
 
     def aoa_cb(self, msg, id):
         """store the incomming measurement in the queue, keep the queue at the desired size"""
@@ -264,12 +239,15 @@ class Locator(Node):
             return
         antenna_origin = t[:3, 3:4]
         p = np.matmul(t, np.vstack((p, np.array([[1]]))))[:3, :]
+        now = self.now_sec()
         if not self.initialised:
             self.filter.set_initial(p, np.eye(3))
             self.initialised = True
+            self.filter_last_time = now
         else:
-            self.filter.correct(p)
-            x_new, cov = self.filter.predict()
+            dt = now - self.filter_last_time
+            self.filter_last_time = now
+            x_new, cov = self.filter.step(p, dt)
             direction = x_new - antenna_origin
             direction /= np.linalg.norm(direction)
 

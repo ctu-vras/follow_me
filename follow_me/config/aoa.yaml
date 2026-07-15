@@ -5,6 +5,19 @@
     estimate_frame: "twr_position"
     mode: "RSSI"
 
+    # Kalman filter tuning (live-tunable via `ros2 param set`, no restart needed).
+    # kalman_q: process noise rate (per second) - higher trusts the model less,
+    #   the measurements more, on every step.
+    # kalman_r: measurement noise variance - higher smooths harder / reacts slower.
+    # kalman_gate_threshold / kalman_max_inflation: control the innovation gate
+    #   that lets the filter snap to a real sudden jump (e.g. the robot turning)
+    #   in ~1-2 cycles instead of smoothing it in over several seconds. Lower
+    #   the threshold or raise max_inflation if jumps still feel sluggish.
+    kalman_q: 1.0
+    kalman_r: 0.05
+    kalman_gate_threshold: 9.0
+    kalman_max_inflation: 200.0
+
     ids:
       - "bt_an0"
       # - "an2"

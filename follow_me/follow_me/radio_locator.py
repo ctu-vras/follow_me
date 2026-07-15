@@ -17,57 +17,17 @@ from dwm1001_ros_interfaces.msg import UWBMeas
 from std_msgs.msg import Bool, String
 from follow_me_interfaces.msg import PositionEstimate, HeadingEstimate
 
-from follow_me.utils import get_transform
+from follow_me.utils import (
+    Kalman,
+    attach_kalman_param_callback,
+    declare_kalman_parameters,
+    get_transform,
+)
 
-R_const = 20
-Q_const = 1
 CUTOFF = 3.0
 fs = 10
 
 np.set_printoptions(precision=3)
-
-
-class Kalman:
-    def __init__(self, x0, P0, dt):
-        self.x = x0
-        self.x_cov = P0
-        self.dt = dt
-        self.A = np.array(
-            [
-                [1, 0, 0],
-                [0, 1, 0],
-                [0, 0, 1],
-            ]
-        )
-        self.Q = Q_const * np.eye(3)
-        self.R = R_const * np.eye(3)
-        self.H = np.array(
-            [
-                [1, 0, 0],
-                [0, 1, 0],
-                [0, 0, 1],
-            ]
-        )
-
-    def set_initial(self, x0, P0):
-        self.x = x0
-        self.x_cov = P0
-
-    def predict(self):
-        self.x = np.matmul(self.A, self.x)
-        self.x_cov = np.matmul(np.matmul(self.A, self.x_cov), self.A.T) + self.Q
-        return self.x, self.x_cov
-
-    def correct(self, measurement):
-        K = np.matmul(
-            np.matmul(self.x_cov, self.H.T),
-            np.linalg.inv(np.matmul(np.matmul(self.H, self.x_cov), self.H.T) + self.R),
-        )
-        self.x = self.x + np.matmul(K, measurement - np.matmul(self.H, self.x))
-        self.x_cov = np.matmul(
-            np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov
-        )
-        return self.x, self.x_cov
 
 
 class Locator(Node):
@@ -161,13 +121,28 @@ class Locator(Node):
         else:
             self.last_pos = np.array([np.nan, np.nan])
 
-        self.filter = Kalman(np.array([[0], [0], [0], [0], [0]]), np.eye(5), 0.1)
+        # r is set near the actual measurement noise of the TWR trilateration
+        # solve (~0.5m std): the previous r=20 (~4.5m std) made every measurement
+        # look "expected" no matter how far off, which (combined with the
+        # predict/correct ordering bug) is why the innovation gate below would
+        # never have fired - a real jump and normal noise looked statistically
+        # identical. gate_threshold/max_inflation control how aggressively real
+        # jumps (e.g. the robot turning suddenly) get absorbed in ~1-2 cycles
+        # instead of smoothed away over seconds; q is the nominal per-second
+        # process noise for calm conditions.
+        kalman_params = declare_kalman_parameters(self, q=1.0, r=0.25)
+        self.filter = Kalman(np.array([[0.0], [0.0], [0.0]]), np.eye(3), **kalman_params)
+        attach_kalman_param_callback(self, self.filter)
+        self.filter_last_time = None
         self.initialised = False
 
         self.started = False
         self.pub = self.create_publisher(Bool, "/detection_ready", 1)
         self.estimate_pub = self.create_publisher(PositionEstimate, "estimate", 1)
         self.pose_pub = self.create_publisher(PoseStamped, "estimate_pose", 1)
+        self.pose_cov_pub = self.create_publisher(
+            PoseWithCovarianceStamped, "estimate_pose_cov", 1
+        )
         self.sound_pub = self.create_publisher(String, "/log_sound", 1)
 
         self.get_logger().info("Waiting for average value of the measurements")
@@ -370,12 +345,15 @@ class Locator(Node):
         if not self.use_3d:
             x = np.concatenate((x, np.array([self.mount_height])))
 
+        now = self.now_sec()
         if not self.initialised:
             self.filter.set_initial(np.array([[x[0]], [x[1]], [x[2]]]), np.eye(3))
             self.initialised = True
+            self.filter_last_time = now
         else:
-            self.filter.correct(np.array([[x[0]], [x[1]], [x[2]]]))
-            x_new, cov = self.filter.predict()
+            dt = now - self.filter_last_time
+            self.filter_last_time = now
+            x_new, cov = self.filter.step(np.array([[x[0]], [x[1]], [x[2]]]), dt)
             cov_pose = np.zeros((6, 6))
             cov_pose[:3, :3] = cov[:3, :3]
             x = x_new[0:3, :].flatten()
@@ -386,6 +364,7 @@ class Locator(Node):
             self.p.pose.pose.position.z = float(x[2])
 
             self.p.pose.covariance = cov_pose.flatten().tolist()
+            self.pose_cov_pub.publish(self.p)
 
         if self.use_3d:
             self.last_pos = x

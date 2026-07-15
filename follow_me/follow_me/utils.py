@@ -6,6 +6,7 @@ import rclpy
 import rclpy.time
 import ros2_numpy
 from numpy.linalg import norm
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.duration import Duration
 from tf2_ros import (
     ConnectivityException,
@@ -237,6 +238,114 @@ class PID:
         self.i_term = 0.0
         self.filter = 0.0
         self.last_err = None
+
+
+class Kalman:
+    """Constant-position (random-walk) Kalman filter for a 3D position, with
+    innovation-gated adaptive process noise.
+
+    A constant-velocity state was considered and rejected: this filter tracks a
+    target's position in a frame that can itself rotate abruptly (e.g. a frame
+    fixed to a robot that turns quickly), so "velocity" in that frame is not a
+    smooth, extrapolatable quantity - during a fast turn it's dominated by the
+    turn rate, not by how the tracked person is actually walking. A CV model would
+    extrapolate stale pre-turn velocity straight through the event we want to
+    react to.
+
+    Instead the state stays position-only, but each step checks the normalized
+    innovation (how far the new measurement is from the prediction, relative to
+    the filter's own uncertainty). A small innovation means normal sensor noise
+    and gets smoothed as usual. A large one means a genuine abrupt change (robot
+    turned, person changed direction) - the covariance is inflated before the
+    gain is computed so the correction closes most of the gap in one or two
+    cycles instead of several seconds of exponential creep.
+
+    q is the process noise rate (m^2/s, applied as Q*dt so it scales correctly
+    with the actual elapsed time between updates). r is the measurement noise
+    variance (m^2). gate_threshold is compared against the normalized innovation
+    squared (~chi-square, 3 dof; 9.0 is roughly the 97th percentile) and
+    max_inflation caps how far a single outlier can blow up the covariance.
+    """
+
+    def __init__(self, x0, P0, q, r, gate_threshold=9.0, max_inflation=200.0):
+        self.x = x0
+        self.x_cov = P0
+        self.H = np.eye(3)
+        self.Q = q * np.eye(3)
+        self.R = r * np.eye(3)
+        self.gate_threshold = gate_threshold
+        self.max_inflation = max_inflation
+
+    def set_initial(self, x0, P0):
+        self.x = x0
+        self.x_cov = P0
+
+    def predict(self, dt):
+        # A = I (no motion model); process noise still accrues with elapsed time
+        self.x_cov = self.x_cov + self.Q * dt
+        return self.x, self.x_cov
+
+    def correct(self, measurement):
+        K = np.matmul(
+            np.matmul(self.x_cov, self.H.T),
+            np.linalg.inv(np.matmul(np.matmul(self.H, self.x_cov), self.H.T) + self.R),
+        )
+        self.x = self.x + np.matmul(K, measurement - np.matmul(self.H, self.x))
+        self.x_cov = np.matmul(
+            np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov
+        )
+        return self.x, self.x_cov
+
+    def step(self, measurement, dt):
+        """predict then correct (the correct KF order - the gain must be computed
+        from the predicted, not the stale pre-predict, covariance), with
+        innovation gating so large genuine jumps are absorbed in one step instead
+        of over several seconds of smoothing"""
+        self.predict(dt)
+        innovation = measurement - np.matmul(self.H, self.x)
+        S = np.matmul(np.matmul(self.H, self.x_cov), self.H.T) + self.R
+        d2 = float(np.matmul(np.matmul(innovation.T, np.linalg.inv(S)), innovation))
+        if d2 > self.gate_threshold:
+            factor = min(d2 / self.gate_threshold, self.max_inflation)
+            self.x_cov = self.x_cov * factor
+        return self.correct(measurement)
+
+
+def declare_kalman_parameters(node, prefix="kalman", q=1.0, r=1.0, gate_threshold=9.0, max_inflation=200.0):
+    """declare a Kalman filter's tuning knobs as ROS parameters and return their
+    current values (from the param server / launch overrides) as a dict, ready to
+    pass into Kalman(...). Pair with attach_kalman_param_callback to make them
+    tunable at runtime via `ros2 param set`."""
+    node.declare_parameter(f"{prefix}_q", q)
+    node.declare_parameter(f"{prefix}_r", r)
+    node.declare_parameter(f"{prefix}_gate_threshold", gate_threshold)
+    node.declare_parameter(f"{prefix}_max_inflation", max_inflation)
+    return {
+        "q": node.get_parameter(f"{prefix}_q").value,
+        "r": node.get_parameter(f"{prefix}_r").value,
+        "gate_threshold": node.get_parameter(f"{prefix}_gate_threshold").value,
+        "max_inflation": node.get_parameter(f"{prefix}_max_inflation").value,
+    }
+
+
+def attach_kalman_param_callback(node, kalman, prefix="kalman"):
+    """update a Kalman filter's tuning in place whenever its ROS parameters change
+    at runtime, so it can be retuned in the field (e.g. `ros2 param set <node>
+    kalman_q 5.0`) without restarting the node"""
+
+    def cb(params):
+        for p in params:
+            if p.name == f"{prefix}_q":
+                kalman.Q = p.value * np.eye(3)
+            elif p.name == f"{prefix}_r":
+                kalman.R = p.value * np.eye(3)
+            elif p.name == f"{prefix}_gate_threshold":
+                kalman.gate_threshold = p.value
+            elif p.name == f"{prefix}_max_inflation":
+                kalman.max_inflation = p.value
+        return SetParametersResult(successful=True)
+
+    node.add_on_set_parameters_callback(cb)
 
 
 def get_angle(Va, Vb, Vn):
