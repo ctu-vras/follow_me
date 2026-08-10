@@ -13,10 +13,12 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>follow_me_interfaces</exec_depend>
   <exec_depend>ros2_numpy</exec_depend>
   <exec_depend>sound_play</exec_depend>

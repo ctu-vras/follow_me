@@ -28,6 +28,7 @@ setup(
             "cube_locator = follow_me.cube_locator:main",
             "cube_marker = follow_me.cube_marker:main",
             "logger = follow_me.logger:main",
+            "pose_tracker = follow_me.pose_tracker:main",
             "publish_tfs = follow_me.publish_tfs:main",
             "radio_locator = follow_me.radio_locator:main",
             "tdoa_locator = follow_me.tdoa_locator:main",
