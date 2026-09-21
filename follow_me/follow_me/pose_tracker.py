@@ -80,6 +80,12 @@ class PoseTracker(Node):
 
         self.window_poses = []
 
+        # state used only to log notable events once, instead of on every message
+        self._got_first_pose = False
+        self._tf_failing = False
+        self._stalled = False
+        self._path_full = False
+
         self.pose_sub = self.create_subscription(
             PoseStamped, "pose", self.pose_cb, 10
         )
@@ -88,10 +94,17 @@ class PoseTracker(Node):
 
         self.tim = self.create_timer(1.0 / publish_rate, self.publish_path)
 
+        self.get_logger().info(
+            f"Started: tracking 'pose' in frame '{self.map_frame}', publishing "
+            f"'path' and 'pose_array' at {publish_rate} Hz (max_points={self.max_points}, "
+            f"average_poses={self.average_poses}, tf_timeout={self.tf_timeout} s)"
+        )
+
     def _param_cb(self, params):
         for p in params:
             if p.name == "max_points":
                 self.max_points = p.value
+                self._path_full = False
             elif p.name == "average_poses":
                 self.average_poses = p.value
             elif p.name == "tf_timeout":
@@ -99,29 +112,76 @@ class PoseTracker(Node):
             elif p.name == "publish_rate":
                 self.tim.cancel()
                 self.tim = self.create_timer(1.0 / p.value, self.publish_path)
+            elif p.name == "map_frame":
+                self.get_logger().warning(
+                    f"'map_frame' is only read at startup; ignoring runtime change to '{p.value}' "
+                    f"(still using '{self.map_frame}')"
+                )
+                continue
+            else:
+                continue
+            self.get_logger().info(f"Parameter '{p.name}' set to {p.value}")
         return SetParametersResult(successful=True)
+
+    def _accept(self, pose):
+        if not self._got_first_pose:
+            self._got_first_pose = True
+            self.get_logger().info(
+                f"First pose received; tracking in frame '{self.map_frame}'"
+            )
+        self.window_poses.append(pose)
 
     def pose_cb(self, msg):
         if msg.header.frame_id == self.map_frame:
-            self.window_poses.append(msg)
+            self._accept(msg)
             return
 
         try:
             transformed = self.tf_buffer.transform(
                 msg, self.map_frame, timeout=Duration(seconds=self.tf_timeout)
             )
-        except (LookupException, ExtrapolationException):
+        except (LookupException, ExtrapolationException) as ex:
+            self._tf_failing = True
+            self.get_logger().warning(
+                f"Dropping pose: cannot transform '{msg.header.frame_id}' -> "
+                f"'{self.map_frame}': {ex}",
+                throttle_duration_sec=5.0,
+            )
             return
         except ConnectivityException as ex:
-            self.get_logger().error(str(ex))
+            self._tf_failing = True
+            self.get_logger().error(
+                f"TF connectivity error transforming '{msg.header.frame_id}' -> "
+                f"'{self.map_frame}': {ex}",
+                throttle_duration_sec=5.0,
+            )
             return
 
-        self.window_poses.append(transformed)
+        if self._tf_failing:
+            self._tf_failing = False
+            self.get_logger().info(
+                f"Transform '{msg.header.frame_id}' -> '{self.map_frame}' available again"
+            )
+        self._accept(transformed)
 
     def publish_path(self):
         if len(self.window_poses) == 0:
+            if not self._got_first_pose:
+                self.get_logger().info(
+                    "Waiting for first pose on 'pose'...", throttle_duration_sec=10.0
+                )
+            elif not self._stalled:
+                self._stalled = True
+                self.get_logger().warning(
+                    "No new poses since the last publish; path not updated"
+                )
             return
 
+        if self._stalled:
+            self._stalled = False
+            self.get_logger().info("Poses received again; resuming path updates")
+
+        n_window = len(self.window_poses)
         if self.average_poses:
             pose = average_poses(self.window_poses)
         else:
@@ -135,6 +195,11 @@ class PoseTracker(Node):
 
         self.path.poses.append(point)
         if self.max_points > 0:
+            if len(self.path.poses) > self.max_points and not self._path_full:
+                self._path_full = True
+                self.get_logger().info(
+                    f"Path reached max_points={self.max_points}; dropping oldest points"
+                )
             self.path.poses = self.path.poses[-self.max_points :]
 
         self.path.header.stamp = point.header.stamp
@@ -145,6 +210,11 @@ class PoseTracker(Node):
         pose_array.poses = [p.pose for p in self.path.poses]
         self.pose_array_pub.publish(pose_array)
 
+        self.get_logger().debug(
+            f"Published {len(self.path.poses)} points "
+            f"({'averaged' if self.average_poses else 'latest of'} {n_window} new poses)"
+        )
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -154,6 +224,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node.get_logger().info(f"Shutting down with {len(node.path.poses)} points in path")
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
