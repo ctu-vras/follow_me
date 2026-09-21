@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # subscribes to a PoseStamped, transforms it into map_frame immediately, and
-# tracks it as a nav_msgs Path at a lower, fixed publish rate
+# tracks it as a nav_msgs Path (plus a matching PoseArray) at a lower, fixed
+# publish rate
 
 import numpy as np
 import rclpy
@@ -10,7 +11,7 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 
 from tf2_ros import Buffer, TransformListener, ConnectivityException, ExtrapolationException, LookupException
-from geometry_msgs.msg import Pose, PoseStamped
+from geometry_msgs.msg import Pose, PoseArray, PoseStamped
 from nav_msgs.msg import Path
 
 
@@ -83,6 +84,7 @@ class PoseTracker(Node):
             PoseStamped, "pose", self.pose_cb, 10
         )
         self.path_pub = self.create_publisher(Path, "path", 1)
+        self.pose_array_pub = self.create_publisher(PoseArray, "pose_array", 1)
 
         self.tim = self.create_timer(1.0 / publish_rate, self.publish_path)
 
@@ -137,6 +139,11 @@ class PoseTracker(Node):
 
         self.path.header.stamp = point.header.stamp
         self.path_pub.publish(self.path)
+
+        pose_array = PoseArray()
+        pose_array.header = self.path.header
+        pose_array.poses = [p.pose for p in self.path.poses]
+        self.pose_array_pub.publish(pose_array)
 
 
 def main(args=None):
