@@ -1,0 +1,50 @@
+# Parameters for the simulated UWB TWR hardware used by sim.launch.py.
+# Same schema as twr.yaml (for the real hardware), but describing a
+# hypothetical 4-anchor layout. Loaded by sim.launch.py's load_twr_shared()
+# and mirrored into sim_data_generator / radio_locator as twr_* parameters,
+# the same way radio.launch.py does for the real twr.yaml.
+/**:
+  ros__parameters:
+    human_frame: "tag_gt"  # not read by radio_locator itself, kept for schema parity with twr.yaml
+    target: "TAG1"  # UWB tag ID carried by the simulated human/target
+
+    ids:
+      - "SIM1"
+      - "SIM2"
+      - "SIM3"
+      - "SIM4"
+
+    # x, y, z per anchor (flat list) - offsets from base_link
+    positions:
+      - 0.460
+      - 0.260
+      - 0.0
+      - 0.460
+      - -0.260
+      - 0.0
+      - -0.460
+      - 0.100
+      - 0.0
+      - -0.460
+      - -0.100
+      - 0.0
+
+    # 4 identity polynomial coefficients per anchor (flat list) - no
+    # calibration distortion is applied in simulation
+    calibration:
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0

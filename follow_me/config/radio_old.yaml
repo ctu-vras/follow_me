@@ -1,0 +1,18 @@
+# Config for the pre-refactor radio_locator (radio_locator_old.py), used to
+# A/B it against a recorded run of the new polar-Kalman radio_locator via
+# bag_compare.launch.py. Values match the last real-robot radio.yaml before
+# the polar Kalman change (git HEAD~ish), except fixed_frame/human_frame,
+# which are set here to avoid colliding with what the bag already has.
+/**:
+  ros__parameters:
+    fixed_frame: "base_link"
+    human_frame: "radio_position_old"
+    use_3d: false
+    use_aoa: true
+    mount_height: 0.0
+    max_msg_delay: 0.3
+
+    kalman_q: 1.0
+    kalman_r: 0.25
+    kalman_gate_threshold: 9.0
+    kalman_max_inflation: 200.0

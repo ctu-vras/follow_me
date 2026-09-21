@@ -25,7 +25,7 @@ def generate_launch_description():
     #
     from launch.actions import IncludeLaunchDescription
     from launch.launch_description_sources import PythonLaunchDescriptionSource
-    for port in ("0", "1", "2", "3"):
+    for port in ("0", "1", "2"):
         ld.add_action(IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory("dwm1001_ros"),

@@ -31,6 +31,8 @@ setup(
             "pose_tracker = follow_me.pose_tracker:main",
             "publish_tfs = follow_me.publish_tfs:main",
             "radio_locator = follow_me.radio_locator:main",
+            "radio_locator_old = follow_me.radio_locator_old:main",
+            "sim_data_generator = follow_me.sim_data_generator:main",
             "tdoa_locator = follow_me.tdoa_locator:main",
             "twr_locator = follow_me.twr_locator:main",
             "twr_visualizer = follow_me.twr_visualizer:main",

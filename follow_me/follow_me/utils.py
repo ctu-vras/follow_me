@@ -311,6 +311,149 @@ class Kalman:
         return self.correct(measurement)
 
 
+class PolarKalman:
+    """Kalman filter tracking a target in polar coordinates (distance, angle)
+    relative to a frame that can itself rotate (e.g. base_link), with the
+    frame's own yaw rate fed forward as a known control input on the angle
+    state instead of having to be inferred after the fact from noisy
+    measurements.
+
+    State x = [d, angle, d_dot, angle_dot]^T, angle wrapped to +-pi.
+    Measurements are distance (e.g. from TWR trilateration) and/or angle
+    (e.g. from AoA); either can be supplied alone via the use_d/use_angle
+    flags on correct()/step() for a partial update when the other sensor's
+    reading is stale or unavailable that cycle.
+
+    q is the process noise rate (applied as Q*dt). r_d/r_angle are the
+    measurement noise variances for the distance/angle channels
+    respectively. correct()/step() also accept a per-call r_angle override,
+    so a caller can fall back to a lower-trust angle source (e.g. a bearing
+    derived from the distance measurement's own geometry) on cycles where
+    the primary angle sensor is stale, without the filter needing to know
+    where either measurement came from. Innovation gating (see the plain
+    Kalman class above) is intentionally disabled for now - see the
+    commented-out block in correct() - it needs an angle-aware (wrapped)
+    chi-square test before it's safe to re-enable.
+    """
+
+    def __init__(self, x0, P0, q, r_d, r_angle, gate_threshold=9.0, max_inflation=200.0):
+        self.x = x0
+        self.x_cov = P0
+        self.Q = q * np.eye(4)
+        self.r_d = r_d
+        self.r_angle = r_angle
+        self.gate_threshold = gate_threshold
+        self.max_inflation = max_inflation
+
+    def set_initial(self, x0, P0):
+        self.x = x0
+        self.x_cov = P0
+
+    @staticmethod
+    def wrap(angle):
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
+    def predict(self, dt, yaw_delta):
+        """propagate the state by dt seconds, feeding yaw_delta (the robot's
+        yaw rotation integrated over the same interval) forward into the
+        angle state"""
+        A = np.array(
+            [
+                [1.0, 0.0, dt, 0.0],
+                [0.0, 1.0, 0.0, dt],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        B = np.array([[0.0], [1.0], [0.0], [0.0]])
+        self.x = np.matmul(A, self.x) + B * yaw_delta
+        self.x[1, 0] = self.wrap(self.x[1, 0])
+        self.x_cov = np.matmul(np.matmul(A, self.x_cov), A.T) + self.Q * dt
+        return self.x, self.x_cov
+
+    def correct(self, measurement, use_d=True, use_angle=True, r_angle=None):
+        """measurement is a 2x1 [[d], [angle]] vector; use_d/use_angle select
+        which row(s) actually get applied this cycle. r_angle overrides
+        self.r_angle for this call only (e.g. a wider variance when angle
+        comes from a fallback source instead of the primary sensor)"""
+        mask = [use_d, use_angle]
+        idx = [i for i, flag in enumerate(mask) if flag]
+        if not idx:
+            return self.x, self.x_cov
+
+        r_angle = self.r_angle if r_angle is None else r_angle
+        H_full = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+        R_full = np.diag([self.r_d, r_angle])
+        H = H_full[idx, :]
+        R = R_full[np.ix_(idx, idx)]
+
+        innovation = measurement[idx, :] - np.matmul(H, self.x)
+        if use_angle:
+            angle_row = idx.index(1)
+            innovation[angle_row, 0] = self.wrap(innovation[angle_row, 0])
+
+        S = np.matmul(np.matmul(H, self.x_cov), H.T) + R
+
+        # innovation gating disabled for now (needs an angle-wrapped distance
+        # measure before it can be re-enabled safely):
+        # d2 = float(np.matmul(np.matmul(innovation.T, np.linalg.inv(S)), innovation))
+        # if d2 > self.gate_threshold:
+        #     factor = min(d2 / self.gate_threshold, self.max_inflation)
+        #     self.x_cov = self.x_cov * factor
+        #     S = np.matmul(np.matmul(H, self.x_cov), H.T) + R
+
+        K = np.matmul(np.matmul(self.x_cov, H.T), np.linalg.inv(S))
+        self.x = self.x + np.matmul(K, innovation)
+        self.x[1, 0] = self.wrap(self.x[1, 0])
+        self.x_cov = np.matmul(np.eye(4) - np.matmul(K, H), self.x_cov)
+        return self.x, self.x_cov
+
+    def step(self, dt, yaw_delta, measurement, use_d=True, use_angle=True, r_angle=None):
+        """predict then correct, mirroring Kalman.step's ordering"""
+        self.predict(dt, yaw_delta)
+        return self.correct(measurement, use_d, use_angle, r_angle)
+
+
+def declare_polar_kalman_parameters(
+    node, prefix="kalman", q=1.0, r_d=0.25, r_angle=0.02, r_angle_fallback=0.2
+):
+    """same idea as declare_kalman_parameters, sized for PolarKalman's
+    distance/angle measurement noise instead of a single isotropic r.
+    r_angle_fallback is not read by PolarKalman itself - it's a second,
+    looser angle variance a caller can pass into correct()/step()'s r_angle
+    override for cycles where angle comes from a lower-trust fallback source
+    instead of the primary sensor (see radio_locator.py)."""
+    node.declare_parameter(f"{prefix}_q", q)
+    node.declare_parameter(f"{prefix}_r_d", r_d)
+    node.declare_parameter(f"{prefix}_r_angle", r_angle)
+    node.declare_parameter(f"{prefix}_r_angle_fallback", r_angle_fallback)
+    return {
+        "q": node.get_parameter(f"{prefix}_q").value,
+        "r_d": node.get_parameter(f"{prefix}_r_d").value,
+        "r_angle": node.get_parameter(f"{prefix}_r_angle").value,
+    }
+
+
+def attach_polar_kalman_param_callback(node, kalman, prefix="kalman"):
+    """live-tune a PolarKalman's q/r_d/r_angle via `ros2 param set`. Also
+    keeps kalman.r_angle_fallback (set once from declare_polar_kalman_parameters,
+    see radio_locator.py) live-tunable the same way."""
+
+    def cb(params):
+        for p in params:
+            if p.name == f"{prefix}_q":
+                kalman.Q = p.value * np.eye(4)
+            elif p.name == f"{prefix}_r_d":
+                kalman.r_d = p.value
+            elif p.name == f"{prefix}_r_angle":
+                kalman.r_angle = p.value
+            elif p.name == f"{prefix}_r_angle_fallback":
+                kalman.r_angle_fallback = p.value
+        return SetParametersResult(successful=True)
+
+    node.add_on_set_parameters_callback(cb)
+
+
 def declare_kalman_parameters(node, prefix="kalman", q=1.0, r=1.0, gate_threshold=9.0, max_inflation=200.0):
     """declare a Kalman filter's tuning knobs as ROS parameters and return their
     current values (from the param server / launch overrides) as a dict, ready to

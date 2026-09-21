@@ -1,0 +1,50 @@
+# Parameters for the /uwb/twr nodes (twr_locator, twr_visualizer).
+# Loaded per-node in the launch file; "/**" matches any node name so the
+# same file works regardless of the (possibly namespaced) node name.
+/**:
+  ros__parameters:
+    fixed_frame: "locator"
+    human_frame: "twr_position"
+    use_3d: false
+    target: "DA12"
+
+    ids:
+      - "45B0"  #levej predni
+      - "D433"  #pravej predni
+      - "5434"  #levej zadni
+      - "401A"  #pravej zadni
+
+    # x, y, z per tag (flat list)
+    # 920, 520, 200
+    positions:
+      - 0.460
+      - 0.260
+      - 0.0
+      - 0.460
+      - -0.260
+      - 0.0
+      - -0.460
+      - 0.100
+      - 0.0
+      - -0.460
+      - -0.100
+      - 0.0
+
+    # 4 polynomial coefficients per tag (flat list)
+    calibration:
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0

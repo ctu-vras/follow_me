@@ -26,7 +26,7 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(DeclareLaunchArgument("tdoa_available", default_value="false"))
     ld.add_action(DeclareLaunchArgument("twr_available", default_value="true"))
-    ld.add_action(DeclareLaunchArgument("bt_aoa_available", default_value="true"))
+    ld.add_action(DeclareLaunchArgument("bt_aoa_available", default_value="false"))
     ld.add_action(DeclareLaunchArgument("mount_height", default_value="0.0"))
 
     # TDoA subsystem -> namespace uwb/tdoa

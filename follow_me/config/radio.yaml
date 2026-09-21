@@ -2,22 +2,27 @@
 # The twr_* parameters are injected by the launch file from twr.yaml.
 /**:
   ros__parameters:
-    fixed_frame: "locator"
+    fixed_frame: "base_link"
     human_frame: "radio_position"
-    use_3d: false
     use_aoa: false
     mount_height: 0.0
     max_msg_delay: 0.3
 
-    # Kalman filter tuning (live-tunable via `ros2 param set`, no restart needed).
-    # kalman_q: process noise rate (per second) - higher trusts the model less,
-    #   the measurements more, on every step.
-    # kalman_r: measurement noise variance - higher smooths harder / reacts slower.
-    # kalman_gate_threshold / kalman_max_inflation: control the innovation gate
-    #   that lets the filter snap to a real sudden jump (e.g. the robot turning)
-    #   in ~1-2 cycles instead of smoothing it in over several seconds. Lower
-    #   the threshold or raise max_inflation if jumps still feel sluggish.
+    # Kalman filter tuning (live-tunable via `ros2 param set`, no restart
+    # needed). State is [distance, angle, distance_dot, angle_dot]; distance
+    # comes from TWR trilateration, angle from AoA (rotated into fixed_frame),
+    # and the angle state is additionally fed forward each cycle by the
+    # robot's yaw rate integrated from /imu/data.
+    # kalman_q: process noise rate (per second) - higher trusts the model
+    #   less, the measurements more, on every step.
+    # kalman_r_d: measurement noise variance for the distance channel (m^2).
+    # kalman_r_angle: measurement noise variance for the angle channel (rad^2),
+    #   used when a fresh AoA reading is available.
+    # kalman_r_angle_fallback: measurement noise variance (rad^2) used instead
+    #   of kalman_r_angle when AoA is stale/unavailable - the angle channel
+    #   then gets corrected from the bearing implied by the TWR trilateration
+    #   itself, trusted much less than a real AoA reading.
     kalman_q: 1.0
-    kalman_r: 0.25
-    kalman_gate_threshold: 9.0
-    kalman_max_inflation: 200.0
+    kalman_r_d: 0.25
+    kalman_r_angle: 0.02
+    kalman_r_angle_fallback: 0.2

@@ -8,21 +8,19 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import qos_profile_sensor_data
 from scipy.optimize import least_squares
 from scipy.signal import lfilter, lfilter_zi, butter
 
 from tf2_ros import Buffer, TransformBroadcaster, TransformListener
 from geometry_msgs.msg import TransformStamped, Point, PoseWithCovarianceStamped, PoseStamped
-from sensor_msgs.msg import Imu
 from dwm1001_ros_interfaces.msg import UWBMeas
 from std_msgs.msg import Bool, String
 from follow_me_interfaces.msg import PositionEstimate, HeadingEstimate
 
 from follow_me.utils import (
-    PolarKalman,
-    attach_polar_kalman_param_callback,
-    declare_polar_kalman_parameters,
+    Kalman,
+    attach_kalman_param_callback,
+    declare_kalman_parameters,
     get_transform,
 )
 
@@ -34,13 +32,14 @@ np.set_printoptions(precision=3)
 
 class Locator(Node):
     def __init__(self):
-        super().__init__("twr_locator")
+        super().__init__("twr_locator_old")
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
         self.declare_parameter("fixed_frame", Parameter.Type.STRING)
         self.declare_parameter("human_frame", Parameter.Type.STRING)
+        self.declare_parameter("use_3d", False)
         self.declare_parameter("use_aoa", False)
         self.declare_parameter("mount_height", 0.0)
         self.declare_parameter("max_msg_delay", 0.3)
@@ -52,12 +51,14 @@ class Locator(Node):
 
         self.fixed_frame = self.get_parameter("fixed_frame").value
         self.human_frame = self.get_parameter("human_frame").value
+        self.use_3d = self.get_parameter("use_3d").value
         self.use_aoa = self.get_parameter("use_aoa").value
         self.mount_height = self.get_parameter("mount_height").value
         self.max_msg_delay = self.get_parameter("max_msg_delay").value
-        self.get_logger().warn(
-            "radio localisation is set to operate just in the x-y plane"
-        )
+        if not self.use_3d:
+            self.get_logger().warn(
+                "radio localisation is set to operate just in the x-y plane"
+            )
         self.br = TransformBroadcaster(self)
         self.t = TransformStamped()
         self.t.header.frame_id = self.fixed_frame
@@ -107,46 +108,31 @@ class Locator(Node):
             )
             self.zi[id] = lfilter_zi(self.lp_filter[0], self.lp_filter[1])
 
-        # AoA - heading_angle is the azimuth already rotated into fixed_frame
-        # (see angle_cb), so it's directly comparable to the Kalman's angle
-        # state and to yaw rate integrated from imu/data.
-        self.heading_angle = None
+        # AoA
+        self.heading_estimate = None
         self.heading_stamp = None
         if self.use_aoa:
             self.heading_subs = self.create_subscription(
                 HeadingEstimate, "/bluetooth/aoa/angle", self.angle_cb, 1
             )
 
-        # imu/data yaw rate, integrated between Kalman cycles then consumed
-        # (and reset) by the next predict step. imu_R is the (cached, assumed
-        # static - the IMU is rigidly mounted) rotation from the imu message's
-        # frame into fixed_frame, looked up lazily since publish_tfs may not
-        # have published yet when the first imu message arrives.
-        self.imu_R = None
-        self.imu_last_stamp = None
-        self.yaw_accum = 0.0
-        self.imu_sub = self.create_subscription(
-            Imu, "/imu/data", self.imu_cb, qos_profile_sensor_data
-        )
+        if self.use_3d:
+            self.last_pos = np.array([np.nan, np.nan, np.nan])
+        else:
+            self.last_pos = np.array([np.nan, np.nan])
 
-        self.last_pos = np.array([np.nan, np.nan])
-
-        # q is the per-second process noise (applied as Q*dt). r_d/r_angle are
-        # the measurement noise variances for the trilaterated distance
-        # (~0.5m std) and the AoA azimuth (~radians) respectively.
-        # r_angle_fallback is the (much wider) variance used instead of
-        # r_angle when the AoA angle is stale/unavailable and publish_pose
-        # falls back to the bearing implied by the TWR trilateration itself
-        # (see publish_pose). Innovation gating is disabled for now (see
-        # PolarKalman.correct).
-        kalman_params = declare_polar_kalman_parameters(
-            self, q=1.0, r_d=0.25, r_angle=0.02, r_angle_fallback=0.2
-        )
-        self.filter = PolarKalman(
-            np.array([[0.0], [0.0], [0.0], [0.0]]), np.eye(4), **kalman_params
-        )
-        self.filter.r_angle_fallback = self.get_parameter("kalman_r_angle_fallback").value
-        attach_polar_kalman_param_callback(self, self.filter)
+        # r is set near the actual measurement noise of the TWR trilateration
+        # solve (~0.5m std): the previous r=20 (~4.5m std) made every measurement
+        # look "expected" no matter how far off, which (combined with the
+        # predict/correct ordering bug) is why the innovation gate below would
+        # never have fired - a real jump and normal noise looked statistically
+        # identical. gate_threshold/max_inflation control how aggressively real
+        # jumps (e.g. the robot turning suddenly) get absorbed in ~1-2 cycles
+        # instead of smoothed away over seconds; q is the nominal per-second
+        # process noise for calm conditions.
+        kalman_params = declare_kalman_parameters(self, q=1.0, r=0.25)
+        self.filter = Kalman(np.array([[0.0], [0.0], [0.0]]), np.eye(3), **kalman_params)
+        attach_kalman_param_callback(self, self.filter)
         self.filter_last_time = None
         self.initialised = False
 
@@ -189,55 +175,13 @@ class Locator(Node):
             self.uwb_stamps[id] = self.now_sec()
 
     def angle_cb(self, msg):
-        # msg.azimuth is measured in the selected AoA array's own frame
-        # (msg.header.frame_id), which can differ from fixed_frame (and can
-        # change between messages if the aoa_locator switches arrays) - so
-        # rotate it into fixed_frame here, once, right at receipt time.
-        tf = get_transform(self, self.tf_buffer, self.fixed_frame, msg.header.frame_id)
-        if tf is None:
-            self.get_logger().warn(
-                "No transform between %s and %s, discarding AoA measurement"
-                % (self.fixed_frame, msg.header.frame_id)
-            )
-            return
-        R = tf[:3, :3]
-        direction_local = np.array([np.cos(msg.azimuth), np.sin(msg.azimuth), 0.0])
-        direction_fixed = np.matmul(R, direction_local)
-        self.heading_angle = float(np.arctan2(direction_fixed[1], direction_fixed[0]))
+        self.heading_estimate = msg
         self.heading_stamp = self.now_sec()
 
-    def imu_cb(self, msg):
-        # imu/data's frame is not aligned with fixed_frame, so the angular
-        # velocity vector needs the same rotate-then-project treatment as the
-        # AoA azimuth above; only the fixed_frame-z (yaw) component of it
-        # matters for the 2D angle state.
-        if self.imu_R is None:
-            tf = get_transform(self, self.tf_buffer, self.fixed_frame, msg.header.frame_id)
-            if tf is None:
-                self.get_logger().warn(
-                    "No transform between %s and %s yet, discarding imu sample"
-                    % (self.fixed_frame, msg.header.frame_id)
-                )
-                return
-            self.imu_R = tf[:3, :3]
-
-        t = self.now_sec()
-        w_local = np.array(
-            [msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z]
-        )
-        w_fixed = np.matmul(self.imu_R, w_local)
-        # fixed_frame rotates with the robot: a +yaw turn makes a world-fixed
-        # target's bearing in fixed_frame *decrease* by the same amount, hence
-        # the minus sign. Flip kalman's yaw sign convention here if bench
-        # testing (rotate in place, angle state should stay ~constant) shows
-        # the opposite.
-        yaw_rate = -w_fixed[2]
-        if self.imu_last_stamp is not None:
-            dt = t - self.imu_last_stamp
-            self.yaw_accum += yaw_rate * dt
-        self.imu_last_stamp = t
-
     def intersectionPoint(self, guess, init, p_init):
+        if self.use_aoa and self.heading_estimate is None:
+            self.get_logger().warn("No estimate available")
+            return None
         valid_ids = []
         x_t = []
         y_t = []
@@ -278,6 +222,27 @@ class Locator(Node):
             )
             return None
 
+        use_aoa_now = False
+        tf = None
+        angles = None
+        if self.use_aoa:
+            heading_age = t - self.heading_stamp
+            if heading_age > self.max_msg_delay:
+                self.get_logger().warn(
+                    "AoA heading estimate is more than %.2f seconds old, disregarding it"
+                    % self.max_msg_delay
+                )
+            else:
+                angles = [self.heading_estimate.azimuth, self.heading_estimate.elevation]
+                angles_frame = self.heading_estimate.header.frame_id
+                tf = get_transform(self, self.tf_buffer, angles_frame, self.fixed_frame)
+                if tf is None:
+                    self.get_logger().fatal(
+                        "No transform between %s and %s" % (self.fixed_frame, angles_frame)
+                    )
+                    return None
+                use_aoa_now = True
+
         x_t = np.array(x_t)
         y_t = np.array(y_t)
         z_t = np.array(z_t)
@@ -296,17 +261,31 @@ class Locator(Node):
         print(f"age weights {w_t}")
 
         def eq(g):
-            # TWR trilateration only - bearing is handled separately by the
-            # polar Kalman filter's angle state, not folded into this solve.
-            x, y = g
-            f = (
-                (x - x_t) ** 2
-                + (y - y_t) ** 2
-                + (self.mount_height - z_t) ** 2
-                - d**2
-            )
+            # TWR
+            if self.use_3d:
+                x, y, z = g
+                f = (x - x_t) ** 2 + (y - y_t) ** 2 + (z - z_t) ** 2 - d**2
+            else:
+                x, y = g
+                f = (
+                    (x - x_t) ** 2
+                    + (y - y_t) ** 2
+                    + (self.mount_height - z_t) ** 2
+                    - d**2
+                )
 
             f = w_t * f  # weighting based on the age of the measurement
+
+            if use_aoa_now:
+                # AOA
+                # perpendicular distance (in 2D) between the candidate point and the
+                # ray originating at the AoA sensor with direction given by the
+                # measured azimuth angle
+                n = np.array([[np.cos(angles[0])], [np.sin(angles[0])]])
+                p = np.matmul(tf, np.array([[x], [y], [0], [1]]))[:2, :]
+                dist = float(n[0, 0] * p[1, 0] - n[1, 0] * p[0, 0])
+                self.get_logger().info(f"aoa {angles[0]}\n aoa pose {n}\n pose {p}\n DIST {dist}")
+                f = np.vstack((f, 3.0 * dist))
 
             return f.flatten().tolist()
 
@@ -322,7 +301,7 @@ class Locator(Node):
         else:
             ans = least_squares(eq, guess, loss="soft_l1", verbose=0)
             self.get_logger().info(f"success: {ans.success}, {ans.status}, {ans.message}")
-            self.get_logger().info(f"final residual: {ans.fun} result pose {ans.x}")
+            self.get_logger().info(f"final residual (incl. AoA): {ans.fun} result pose {ans.x}")
 
             if ans.success:
                 return ans.x
@@ -340,109 +319,77 @@ class Locator(Node):
         p_init = []
         if np.any(np.isnan(self.last_pos)):
             p = self.positions[self.ids[0]]
-            p_init += [np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])]
-            p_init += [np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]]])]
-            p_init += [np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0]])]
-            p_init += [np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]]])]
+            if self.use_3d:
+                p_init += [
+                    np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])
+                ]
+                p_init += [
+                    np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]])
+                ]
+                p_init += [
+                    np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])
+                ]
+                p_init += [
+                    np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]])
+                ]
+            else:
+                p_init += [np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])]
+                p_init += [np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]]])]
+                p_init += [np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0]])]
+                p_init += [np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]]])]
             init = True
         x = self.intersectionPoint(self.last_pos, init, p_init)
         if x is None:
             self.get_logger().warn("intersection point not found")
             return
-        # trilateration is distance-only now: reduce the solved (x, y) down to
-        # the single distance from the origin of fixed_frame, which is what
-        # the polar Kalman filter's "d" state tracks. The same (x, y) also
-        # gives a bearing "for free" out of the anchor geometry alone - used
-        # below as a fallback angle measurement when AoA is stale/unavailable,
-        # so the angle state always gets corrected by something instead of
-        # free-running on the imu integration alone.
-        d_meas = float(np.hypot(x[0], x[1]))
-        angle_fallback = float(np.arctan2(x[1], x[0]))
-
-        use_aoa_angle = False
-        if self.use_aoa and self.heading_stamp is not None:
-            heading_age = self.now_sec() - self.heading_stamp
-            if heading_age > self.max_msg_delay:
-                self.get_logger().warn(
-                    "AoA heading estimate is more than %.2f seconds old, "
-                    "falling back to the trilaterated bearing" % self.max_msg_delay
-                )
-            else:
-                use_aoa_angle = True
-
-        if use_aoa_angle:
-            angle_meas = self.heading_angle
-            r_angle = self.filter.r_angle
-        else:
-            angle_meas = angle_fallback
-            r_angle = self.filter.r_angle_fallback
+        if not self.use_3d:
+            x = np.concatenate((x, np.array([self.mount_height])))
 
         now = self.now_sec()
         if not self.initialised:
-            x0 = np.array([[d_meas], [angle_meas], [0.0], [0.0]])
-            P0 = np.eye(4)
-            self.filter.set_initial(x0, P0)
+            self.filter.set_initial(np.array([[x[0]], [x[1]], [x[2]]]), np.eye(3))
             self.initialised = True
             self.filter_last_time = now
-            self.yaw_accum = 0.0
-            d_est, angle_est = d_meas, angle_meas
         else:
             dt = now - self.filter_last_time
             self.filter_last_time = now
-            yaw_delta = self.yaw_accum
-            self.yaw_accum = 0.0
-            measurement = np.array([[d_meas], [angle_meas]])
-            x_new, cov = self.filter.step(
-                dt, yaw_delta, measurement, use_d=True, use_angle=True, r_angle=r_angle
-            )
-            d_est = float(x_new[0, 0])
-            angle_est = float(x_new[1, 0])
-
-            # propagate the (d, angle) covariance block into x/y via the
-            # polar-to-Cartesian Jacobian, for the published pose covariance
-            J = np.array(
-                [
-                    [np.cos(angle_est), -d_est * np.sin(angle_est)],
-                    [np.sin(angle_est), d_est * np.cos(angle_est)],
-                ]
-            )
-            cov_da = cov[np.ix_([0, 1], [0, 1])]
-            cov_xy = np.matmul(np.matmul(J, cov_da), J.T)
+            x_new, cov = self.filter.step(np.array([[x[0]], [x[1]], [x[2]]]), dt)
             cov_pose = np.zeros((6, 6))
-            cov_pose[:2, :2] = cov_xy
+            cov_pose[:3, :3] = cov[:3, :3]
+            x = x_new[0:3, :].flatten()
 
             self.p.header.stamp = self.get_clock().now().to_msg()
-            self.p.pose.pose.position.x = d_est * np.cos(angle_est)
-            self.p.pose.pose.position.y = d_est * np.sin(angle_est)
-            self.p.pose.pose.position.z = self.mount_height
+            self.p.pose.pose.position.x = float(x[0])
+            self.p.pose.pose.position.y = float(x[1])
+            self.p.pose.pose.position.z = float(x[2])
 
             self.p.pose.covariance = cov_pose.flatten().tolist()
             self.pose_cov_pub.publish(self.p)
 
-        x_out = d_est * np.cos(angle_est)
-        y_out = d_est * np.sin(angle_est)
-        z_out = self.mount_height
-        self.last_pos = np.array([x_out, y_out])
+        if self.use_3d:
+            self.last_pos = x
+        else:
+            self.last_pos = x[:2]
 
         # send estimate
         est = PositionEstimate()
         est.header.frame_id = self.fixed_frame
         est.header.stamp = self.get_clock().now().to_msg()
-        est.position_estimate = Point(x=float(x_out), y=float(y_out), z=float(z_out))
+        est.position_estimate = Point(x=float(x[0]), y=float(x[1]), z=float(x[2]))
         self.estimate_pub.publish(est)
 
         pose = PoseStamped()
         pose.header.frame_id = self.fixed_frame
         pose.header.stamp = est.header.stamp
-        pose.pose.position = Point(x=float(x_out), y=float(y_out), z=float(z_out))
+        pose.pose.position = Point(x=float(x[0]), y=float(x[1]), z=float(x[2]))
         pose.pose.orientation.w = 1.0
         self.pose_pub.publish(pose)
 
         # send tf
         self.t.header.stamp = self.get_clock().now().to_msg()
-        self.t.transform.translation.x = float(x_out)
-        self.t.transform.translation.y = float(y_out)
-        self.t.transform.translation.z = float(z_out)
+        self.t.transform.translation.x = float(x[0])
+        self.t.transform.translation.y = float(x[1])
+        self.t.transform.translation.z = float(x[2])
         self.br.sendTransform(self.t)
 
         # send ready signal
@@ -455,7 +402,9 @@ class Locator(Node):
         for i in range(len(ids)):
             id = ids[i]
             d_meas = d[i]
-            pos = self.positions[id][:2, :]
+            pos = self.positions[id]
+            if not self.use_3d:
+                pos = pos[:2, :]
             d_pred = np.linalg.norm(pos - self.last_pos[:, None])
             w = 1 / (100 * (d_meas - d_pred) ** 2 + 1e-4)
             weights += [w]
